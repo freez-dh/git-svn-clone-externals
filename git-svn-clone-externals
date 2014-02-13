@@ -41,17 +41,11 @@ function do_clone()
                 # additional options for git-svn
                 call git svn clone "$revision" "$module" "$local_directory"
             else
-                call git svn clone "$revision" "$module" -T trunk -b $brch -t $tags "$local_directory"
+				last_version=`svn log -l 2 $remote_url| grep ^r | awk '{print $1}' | sed -n '2,2p' | sed 's/^r//'`
+                call git svn clone "$remote_url" -r$last_version:HEAD "$local_directory" 
             fi
 
         fi
-        (
-            branch="$(echo ${branch}|sed 's,/$,,')"
-            if [ -n "$branch" ]; then
-                cd "$local_directory"
-                call git reset --hard $branch
-            fi
-        )
     )
 }
 
@@ -100,6 +94,8 @@ git svn show-externals | grep -vE '#|^$' | \
     sed 's/\(-r\)[ ]*\([0-9]\{1,\}\)/\1\2/' | \
     while read svn_externals
 do
+	svn_externals=`echo $svn_externals|sed "s/svn:/ svn:/"`
+	echo $svn_externals
 
     number_fields="$(echo ${svn_externals}|awk '{print NF}')"
     case $number_fields in
@@ -109,9 +105,9 @@ do
             remote_url="$(echo ${svn_externals} | awk '{print $2}')"
             ;;
         3)
-            local_directory="$(echo ${svn_externals} | awk '{print $1}' | sed 's,^/,,')"
-            revision=""$(echo ${svn_externals} | awk '{print $2}')
-            remote_url="$(echo ${svn_externals} | awk '{print $3}')"
+            local_directory="$(echo ${svn_externals} | awk 'BEGIN{OFS=""} {print $1,$3}' | sed 's,^/,,')"
+            revision=""
+            remote_url="$(echo ${svn_externals} | awk '{print $2}')"
             ;;
         *) continue ;;
     esac
@@ -127,6 +123,9 @@ do
         [ -z "${remote_url}" ] && continue
 
         export local_directory revision remote_url
+		echo $local_directory
+		echo $revision
+		echo $remote_url
 
         echo "$local_directory -> $remote_url"
 
