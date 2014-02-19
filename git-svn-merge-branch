@@ -22,7 +22,7 @@ fi
 
 function merge_branch {
 	echo -e "$greenc-----------start merge $external_name---------"$endc
-	git merge $branchname
+	git merge --squash $branchname
 	if [ $? != 0 ];
 	then
 		exit 1
