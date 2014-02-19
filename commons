@@ -1,0 +1,30 @@
+#! /bin/bash
+
+function check_toplevel_directory {
+	toplevel_directory="$(git rev-parse --show-cdup)"
+	[ -n "$toplevel_directory" ] && { echo "please run from the toplevel directory"; exit 1; }
+}
+
+greenc="\033[32m"
+endc="\033[0m"
+
+external_dir_name=.git_externals
+
+function foreach_externals {
+	callback_func=$1
+	find $external_dir_name -type d -name .git | while read gitdir; do
+		dir=$(dirname "$gitdir")
+		if [ -d $dir ]; then
+		pushd $dir > /dev/null
+		external_name=${dir#$external_dir_name}
+		$callback_func $dir $external_name
+		echo -e "$greenc-----------start check $external_name---------"$endc
+		git status
+		git-svn-check-unpushed
+		echo -e $greenc"-------------end check $external_name----------"$endc
+		echo ""
+		popd > /dev/null
+		fi
+	done
+}
+

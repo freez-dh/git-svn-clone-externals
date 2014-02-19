@@ -1,7 +1,11 @@
 #!/bin/bash
 
-toplevel_directory="$(git rev-parse --show-cdup)"
-[ -n "$toplevel_directory" ] && { echo "please run from the toplevel directory"; exit 1; }
+filepath=$(readlink $0)
+dirpath=$(dirname $filepath)
+commonspath=$dirpath"/"commons
+. $commonspath
+
+check_toplevel_directory
 
 function do_git_svn () {
 	svn_name=$1
@@ -9,16 +13,14 @@ function do_git_svn () {
 	if [ $? != 0 ];
 	then
 		echo -e "\033[1;31mgit svn $svn_name may not succ,please read above message\033[0m" >&2
+		exit 1
 	fi
 }
 
-find .git_externals -type d -name .git | while read gitdir; do
-	dir=$(dirname "$gitdir")
-    if [ -d $dir ]; then
-	pushd $dir
-	echo $dir
+function do_update {
 	do_git_svn fetch
 	do_git_svn rebase
-	popd
-    fi
-done
+}
+
+foreach_externals do_update
+

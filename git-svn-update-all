@@ -1,0 +1,13 @@
+#! /bin/bash
+
+toplevel_directory="$(git rev-parse --show-cdup)"
+[ -n "$toplevel_directory" ] && { echo "please run from the toplevel directory"; exit 1; }
+
+git svn rebase
+if [ $? != 0 ];
+then
+	echo -e "\033[1;31mgit svn rebase may not succ,please read above message\033[0m" >&2
+	exit 1
+fi
+git-svn-externals-update
+
