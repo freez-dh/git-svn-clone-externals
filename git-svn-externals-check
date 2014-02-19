@@ -1,19 +1,24 @@
 #!/bin/bash
 
-for dir in *; do
+toplevel_directory="$(git rev-parse --show-cdup)"
+[ -n "$toplevel_directory" ] && { echo "please run from the toplevel directory"; exit 1; }
+
+external_dir_name=.git_externals
+
+greenc="\033[32m"
+endc="\033[0m"
+
+find $external_dir_name -type d -name .git | while read gitdir; do
+	dir=$(dirname "$gitdir")
     if [ -d $dir ]; then
-       cd $dir
-       STATUS=$(git status)
-       UNPUSHED=$(git-svn-check-unpushed)
-       if [ $(echo $STATUS|grep -c "clean") -lt 1 -o \
-	    $(echo $UNPUSHED|grep -c "No unpushed") -lt 1 ]; then
-	   echo '>>>>>>>>>>>>>>>>' $dir '<<<<<<<<<<<<<<<<'
-	   git status
-	   git-svn-check-unpushed
-	   echo '----------------------------------------'
-       else
-	   echo $dir 'is clean'
-       fi
-       cd ..
-   fi
+	pushd $dir > /dev/null
+	external_name=${dir#$external_dir_name}
+	echo -e "$greenc-----------start check $external_name---------"$endc
+	git status
+	git-svn-check-unpushed
+	echo -e $greenc"-------------end check $external_name----------"$endc
+	echo ""
+	popd > /dev/null
+    fi
 done
+
