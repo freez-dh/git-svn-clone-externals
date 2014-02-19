@@ -1,0 +1,32 @@
+#! /bin/bash
+
+filepath=$(readlink $0)
+dirpath=$(dirname $filepath)
+commonspath=$dirpath"/"commons
+. $commonspath
+
+check_toplevel_directory
+
+branchname=$1
+if [ -z $branchname ];
+then
+	echo "usage:git-svn-branch branch_name"
+	exit 1
+fi
+
+git branch $branchname
+if [ $? != 0 ];
+then
+	exit 1
+fi
+
+function new_branch {
+	git branch $branchname
+	if [ $? != 0 ];
+	then
+		exit 1
+	fi
+}
+
+foreach_externals new_branch
+

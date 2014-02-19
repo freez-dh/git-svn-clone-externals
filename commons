@@ -18,11 +18,6 @@ function foreach_externals {
 		pushd $dir > /dev/null
 		external_name=${dir#$external_dir_name}
 		$callback_func $dir $external_name
-		echo -e "$greenc-----------start check $external_name---------"$endc
-		git status
-		git-svn-check-unpushed
-		echo -e $greenc"-------------end check $external_name----------"$endc
-		echo ""
 		popd > /dev/null
 		fi
 	done

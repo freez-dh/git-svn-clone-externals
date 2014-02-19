@@ -1,0 +1,34 @@
+#! /bin/bash
+
+filepath=$(readlink $0)
+dirpath=$(dirname $filepath)
+commonspath=$dirpath"/"commons
+. $commonspath
+
+check_toplevel_directory
+
+branchname=$1
+if [ -z $branchname ];
+then
+	echo "usage:git-svn-merge-branch branchname"
+	exit 1
+fi
+
+git merge $branchname
+if [ $? != 0 ];
+then
+	exit 1
+fi
+
+function merge_branch {
+	echo -e "$greenc-----------start merge $external_name---------"$endc
+	git merge $branchname
+	if [ $? != 0 ];
+	then
+		exit 1
+	fi
+	echo -e "$greenc-----------end merge $external_name---------"$endc
+}
+
+foreach_externals merge_branch
+
