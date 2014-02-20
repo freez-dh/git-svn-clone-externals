@@ -1,0 +1,474 @@
+#!/usr/bin/perl
+use lib (split(/:/, $ENV{GITPERLLIB} || "/home/denghui/share/perl/5.10.1"));
+
+use warnings;
+use strict;
+use vars qw/	$AUTHOR $VERSION
+		$sha1 $sha1_short $_revision $_repository
+		$_q $_authors $_authors_prog %users/;
+
+use 5.008;
+
+use Git::SVN;
+use Git::SVN::Editor;
+use Git::SVN::Ra;
+use Git::SVN::Migration;
+
+use Git::SVN::Utils qw(
+	fatal
+);
+
+use Git qw(
+	git_cmd_try
+	command
+	command_oneline
+	command_output_pipe
+	command_close_pipe
+);
+
+
+$sha1 = qr/[a-f\d]{40}/;
+$sha1_short = qr/[a-f\d]{4,40}/;
+my ($_help, $_edit, $_version, $_force, $_publish, $_ticket, $_debug, $_log);
+
+sub verify_ref {
+	my ($ref) = @_;
+	eval { command_oneline([ 'rev-parse', '--verify', $ref ],
+	                       { STDERR => 0 }); };
+}
+
+sub get_tree_from_treeish {
+	my ($treeish) = @_;
+	# $treeish can be a symbolic ref, too:
+	my $type = command_oneline(qw/cat-file -t/, $treeish);
+	my $expected;
+	while ($type eq 'tag') {
+		($treeish, $type) = command(qw/cat-file tag/, $treeish);
+	}
+	if ($type eq 'commit') {
+		$expected = (grep /^tree /, command(qw/cat-file commit/,
+		                                    $treeish))[0];
+		($expected) = ($expected =~ /^tree ($sha1)$/o);
+		die "Unable to get tree from $treeish\n" unless $expected;
+	} elsif ($type eq 'tree') {
+		$expected = $treeish;
+	} else {
+		die "$treeish is a $type, expected tree, tag or commit\n";
+	}
+	return $expected;
+}
+
+sub get_commit_entry {
+	my ($treeish) = shift;
+	my %log_entry = ( log => '', tree => get_tree_from_treeish($treeish) );
+	my $commit_editmsg = "$ENV{GIT_DIR}/COMMIT_EDITMSG";
+	my $commit_msg = "$ENV{GIT_DIR}/COMMIT_MSG";
+	open my $log_fh, '>', $commit_editmsg or croak $!;
+
+	my $type = command_oneline(qw/cat-file -t/, $treeish);
+	if ($type eq 'commit' || $type eq 'tag') {
+		my ($msg_fh, $ctx) = command_output_pipe('cat-file',
+		                                         $type, $treeish);
+		my $in_msg = 0;
+		my $author;
+		my $saw_from = 0;
+		my $msgbuf = "";
+		while (<$msg_fh>) {
+			if (!$in_msg) {
+				$in_msg = 1 if (/^$/);
+				$author = $1 if (/^author (.*>)/);
+			} elsif (/^git-svn-id: /) {
+				# skip this for now, we regenerate the
+				# correct one on re-fetch anyways
+				# TODO: set *:merge properties or like...
+			} else {
+				if (/^From:/ || /^Signed-off-by:/) {
+					$saw_from = 1;
+				}
+				$msgbuf .= $_;
+			}
+		}
+		$msgbuf =~ s/\s+$//s;
+		if ($Git::SVN::_add_author_from && defined($author)
+		    && !$saw_from) {
+			$msgbuf .= "\n\nFrom: $author";
+		}
+		print $log_fh $msgbuf or croak $!;
+		command_close_pipe($msg_fh, $ctx);
+	}
+	close $log_fh or croak $!;
+
+	if ($_edit || ($type eq 'tree')) {
+		chomp(my $editor = command_oneline(qw(var GIT_EDITOR)));
+		system('sh', '-c', $editor.' "$@"', $editor, $commit_editmsg);
+	}
+	rename $commit_editmsg, $commit_msg or croak $!;
+	{
+		require Encode;
+		# SVN requires messages to be UTF-8 when entering the repo
+		local $/;
+		open $log_fh, '<', $commit_msg or croak $!;
+		binmode $log_fh;
+		chomp($log_entry{log} = <$log_fh>);
+
+		my $enc = Git::config('i18n.commitencoding') || 'UTF-8';
+		my $msg = $log_entry{log};
+
+		eval { $msg = Encode::decode($enc, $msg, 1) };
+		if ($@) {
+			die "Could not decode as $enc:\n", $msg,
+			    "\nPerhaps you need to set i18n.commitencoding\n";
+		}
+
+		eval { $msg = Encode::encode('UTF-8', $msg, 1) };
+		die "Could not encode as UTF-8:\n$msg\n" if $@;
+
+		$log_entry{log} = $msg;
+
+		close $log_fh or croak $!;
+	}
+	unlink $commit_msg;
+	\%log_entry;
+}
+
+sub compare_svn_version {
+	my (@ours) = split(/\./, $SVN::Core::VERSION);
+	my (@theirs) = split(/\./, $_[0]);
+	my ($i, $diff);
+
+	for ($i = 0; $i < @ours && $i < @theirs; $i++) {
+		$diff = $ours[$i] - $theirs[$i];
+		return $diff if ($diff);
+	}
+	return 1 if ($i < @ours);
+	return -1 if ($i < @theirs);
+	return 0;
+}
+
+sub _req_svn {
+	require SVN::Core; # use()-ing this causes segfaults for me... *shrug*
+	require SVN::Ra;
+	require SVN::Delta;
+	if (::compare_svn_version('1.1.0') < 0) {
+		fatal "Need SVN::Core 1.1.0 or better (got $SVN::Core::VERSION)";
+	}
+}
+
+sub read_commit_parents {
+	my ($parents, $c) = @_;
+	chomp(my $p = command_oneline(qw/rev-list --parents -1/, $c));
+	$p =~ s/^($c)\s*// or die "rev-list --parents -1 $c failed!\n";
+	@{$parents->{$c}} = split(/ /, $p);
+}
+
+sub linearize_history {
+	my ($gs, $refs) = @_;
+	my %parents;
+	foreach my $c (@$refs) {
+		read_commit_parents(\%parents, $c);
+	}
+
+	my @linear_refs;
+	my %skip = ();
+	my $last_svn_commit = $gs->last_commit;
+	foreach my $c (reverse @$refs) {
+		next if $c eq $last_svn_commit;
+		last if $skip{$c};
+
+		unshift @linear_refs, $c;
+		$skip{$c} = 1;
+
+		# we only want the first parent to diff against for linear
+		# history, we save the rest to inject when we finalize the
+		# svn commit
+		my $fp_a = verify_ref("$c~1");
+		my $fp_b = shift @{$parents{$c}} if $parents{$c};
+		if (!$fp_a || !$fp_b) {
+			die "Commit $c\n",
+			    "has no parent commit, and therefore ",
+			    "nothing to diff against.\n",
+			    "You should be working from a repository ",
+			    "originally created by git-svn\n";
+		}
+		if ($fp_a ne $fp_b) {
+			die "$c~1 = $fp_a, however parsing commit $c ",
+			    "revealed that:\n$c~1 = $fp_b\nBUG!\n";
+		}
+
+		foreach my $p (@{$parents{$c}}) {
+			$skip{$p} = 1;
+		}
+	}
+	(\@linear_refs, \%parents);
+}
+
+sub extract_metadata {
+	my $id = shift or return (undef, undef, undef);
+	my ($url, $rev, $uuid) = ($id =~ /^\s*git-svn-id:\s+(.*)\@(\d+)
+							\s([a-f\d\-]+)$/ix);
+	if (!defined $rev || !$uuid || !$url) {
+		# some of the original repositories I made had
+		# identifiers like this:
+		($rev, $uuid) = ($id =~/^\s*git-svn-id:\s(\d+)\@([a-f\d\-]+)/i);
+	}
+	return ($url, $rev, $uuid);
+}
+
+sub read_git_config {
+	my $opts = shift;
+	my @config_only;
+	foreach my $o (keys %$opts) {
+		# if we have mixedCase and a long option-only, then
+		# it's a config-only variable that we don't need for
+		# the command-line.
+		push @config_only, $o if ($o =~ /[A-Z]/ && $o =~ /^[a-z]+$/i);
+		my $v = $opts->{$o};
+		my ($key) = ($o =~ /^([a-zA-Z\-]+)/);
+		$key =~ s/-//g;
+		my $arg = 'git config';
+		$arg .= ' --int' if ($o =~ /[:=]i$/);
+		$arg .= ' --bool' if ($o !~ /[:=][sfi]$/);
+		if (ref $v eq 'ARRAY') {
+			chomp(my @tmp = `$arg --get-all svn.$key`);
+			@$v = @tmp if @tmp;
+		} else {
+			chomp(my $tmp = `$arg --get svn.$key`);
+			if ($tmp && !($arg =~ / --bool/ && $tmp eq 'false')) {
+				$$v = $tmp;
+			}
+		}
+	}
+	delete @$opts{@config_only} if @config_only;
+}
+
+sub working_head_info {
+	my ($head, $refs) = @_;
+	my @args = qw/rev-list --first-parent --pretty=medium/;
+	my ($fh, $ctx) = command_output_pipe(@args, $head, "--");
+	my $hash;
+	my %max;
+	while (<$fh>) {
+		if ( m{^commit ($::sha1)$} ) {
+			unshift @$refs, $hash if $hash and $refs;
+			$hash = $1;
+			next;
+		}
+		next unless s{^\s*(git-svn-id:)}{$1};
+		my ($url, $rev, $uuid) = extract_metadata($_);
+		if (defined $url && defined $rev) {
+			next if $max{$url} and $max{$url} < $rev;
+			if (my $gs = Git::SVN->find_by_url($url)) {
+				my $c = $gs->rev_map_get($rev, $uuid);
+				if ($c && $c eq $hash) {
+					close $fh; # break the pipe
+					return ($url, $rev, $uuid, $gs);
+				} else {
+					$max{$url} ||= $gs->rev_map_max;
+				}
+			}
+		}
+	}
+	command_close_pipe($fh, $ctx);
+	(undef, undef, undef, undef);
+}
+
+sub post_fetch_checkout {
+	my $gs = $Git::SVN::_head or return;
+
+	# look for "trunk" ref if it exists
+	my $remote = Git::SVN::read_all_remotes()->{$gs->{repo_id}};
+	my $fetch = $remote->{fetch};
+	if ($fetch) {
+		foreach my $p (keys %$fetch) {
+			basename($fetch->{$p}) eq 'trunk' or next;
+			$gs = Git::SVN->new($fetch->{$p}, $gs->{repo_id}, $p);
+			last;
+		}
+	}
+
+	command_noisy(qw(update-ref HEAD), $gs->refname);
+	return unless verify_ref('HEAD^0');
+
+	return if $ENV{GIT_DIR} !~ m#^(?:.*/)?\.git$#;
+	my $index = $ENV{GIT_INDEX_FILE} || "$ENV{GIT_DIR}/index";
+	return if -f $index;
+
+	return if command_oneline(qw/rev-parse --is-inside-work-tree/) eq 'false';
+	return if command_oneline(qw/rev-parse --is-inside-git-dir/) eq 'true';
+	command_noisy(qw/read-tree -m -u -v HEAD HEAD/);
+	print STDERR "Checked out HEAD:\n  ",
+	             $gs->full_url, " r", $gs->last_rev, "\n";
+	if (auto_create_empty_directories($gs)) {
+		$gs->mkemptydirs($gs->last_rev);
+	}
+}
+
+sub cmt_metadata {
+	return extract_metadata((grep(/^git-svn-id: /,
+		command(qw/cat-file commit/, shift)))[-1]);
+}
+
+sub cmd_postreview {
+	my $org_change_name = shift;
+	if (!defined $org_change_name) {
+		print "must provide change_name\n";
+		return 0;
+	}
+	print "change_name $org_change_name\n";
+	my @refs;
+	my ($url, $rev, $uuid, $gs) = working_head_info('HEAD', \@refs);
+	unless ($gs) {
+		die "Unable to determine upstream SVN information from ",
+		    "history.\nPerhaps the repository is empty.";
+	}
+	my ($linear_refs, $parents) = linearize_history($gs, \@refs);
+	my $prefix = 0;
+	while (1) {
+		my $d = shift @$linear_refs or last;
+		my $change_name = $org_change_name;
+		if ($prefix != 0) {
+			$change_name .= $prefix;
+		}
+		my $tree_a = "$d~1";
+		my $tree_b = $d;
+		(undef, my $last_rev, undef) = cmt_metadata("$d~1");
+		unless (defined $last_rev) {
+			fatal "Unable to extract revision information ",
+				  "from commit $d~1";
+		}
+		my $ra = Git::SVN::Ra->new($url);
+		my %ed_opts = ( r => $last_rev,
+						log => get_commit_entry($d)->{log},
+						ra => $ra,
+						config => SVN::Core::config_get_config(
+								$Git::SVN::Ra::config_dir
+						),
+						tree_a => $tree_a,
+						tree_b => $tree_b,
+						editor_cb => sub {
+							   print "Nothing done\n";
+						},
+						svn_path => '');
+		my $mods = Git::SVN::Editor->new(\%ed_opts)->{mods};
+		my ($fh, $tmp_filename) = File::Temp::tempfile();
+		print "temp file name $tmp_filename\n";
+		foreach my $m (@$mods) {
+			print $fh (join(" ", ($m->{chg}, $m->{file_b})), "\n");
+		}
+		close($fh);
+		my $re_path = $url;
+		$re_path =~ s/$ra->{repos_root}//g;
+		my @svnx_cmd = (
+			"svnx",
+			"pr", $change_name,
+			"-l".$tmp_filename,
+			"-r".$re_path);
+		my %svnx_options = (f => $_force,
+			p => $_publish,
+			d => $_debug,
+			"t".($_ticket or "") => $_ticket,
+			m => $_log,
+
+		);
+		while (my ($option_name, $option_value) = each%svnx_options) {
+			if (defined($option_value)) {
+				push(@svnx_cmd, "-".$option_name)
+			}
+		}
+		system(@svnx_cmd);
+		$prefix++;
+	}
+}
+
+
+my %cmd = (
+	postreview => [ \&cmd_postreview,
+	             'post diffs to review board',
+			{'force|f' => \$_force, 
+			  'publish|p' => \$_publish,
+			  'ticket|t' => \$_ticket,
+			  'debug|d' => \$_debug,
+			  'm' => \$_log,
+			} ],
+);
+
+my $cmd;
+for (my $i = 0; $i < @ARGV; $i++) {
+	if (defined $cmd{$ARGV[$i]}) {
+		$cmd = $ARGV[$i];
+		splice @ARGV, $i, 1;
+		last;
+	} elsif ($ARGV[$i] eq 'help') {
+		$cmd = $ARGV[$i+1];
+		usage(0);
+	}
+};
+
+# make sure we're always running at the top-level working directory
+if ($cmd && $cmd =~ /(?:clone|init|multi-init)$/) {
+	$ENV{GIT_DIR} ||= ".git";
+} else {
+	my ($git_dir, $cdup);
+	git_cmd_try {
+		$git_dir = command_oneline([qw/rev-parse --git-dir/]);
+	} "Unable to find .git directory\n";
+	git_cmd_try {
+		$cdup = command_oneline(qw/rev-parse --show-cdup/);
+		chomp $cdup if ($cdup);
+		$cdup = "." unless ($cdup && length $cdup);
+	} "Already at toplevel, but $git_dir not found\n";
+	$ENV{GIT_DIR} = $git_dir;
+	chdir $cdup or die "Unable to chdir up to '$cdup'\n";
+	$_repository = Git->repository(Repository => $ENV{GIT_DIR});
+}
+
+my %opts = %{$cmd{$cmd}->[2]} if (defined $cmd);
+
+read_git_config(\%opts);
+if ($cmd && ($cmd eq 'log' || $cmd eq 'blame')) {
+	Getopt::Long::Configure('pass_through');
+}
+usage(0) if $_help;
+version() if $_version;
+usage(1) unless defined $cmd;
+load_authors() if $_authors;
+if (defined $_authors_prog) {
+	$_authors_prog = "'" . File::Spec->rel2abs($_authors_prog) . "'";
+}
+
+unless ($cmd =~ /^(?:clone|init|multi-init|commit-diff)$/) {
+	Git::SVN::Migration::migration_check();
+}
+Git::SVN::init_vars();
+eval {
+	Git::SVN::verify_remotes_sanity();
+	$cmd{$cmd}->[0]->(@ARGV);
+	post_fetch_checkout();
+};
+fatal $@ if $@;
+exit 0;
+
+sub usage {
+	my $exit = shift || 0;
+	my $fd = $exit ? \*STDERR : \*STDOUT;
+	print $fd <<"";
+git-svn-pr \n
+
+	print $fd "Available commands:\n" unless $cmd;
+
+	foreach (sort keys %cmd) {
+		next if $cmd && $cmd ne $_;
+		next if /^multi-/; # don't show deprecated commands
+		print $fd '  ',pack('A17',$_),$cmd{$_}->[1],"\n";
+		foreach (sort keys %{$cmd{$_}->[2]}) {
+			# mixed-case options are for .git/config only
+			next if /[A-Z]/ && /^[a-z]+$/i;
+			# prints out arguments as they should be passed:
+			my $x = s#[:=]s$## ? '<arg>' : s#[:=]i$## ? '<num>' : '';
+			print $fd ' ' x 21, join(', ', map { length $_ > 1 ?
+							"--$_" : "-$_" }
+						split /\|/,$_)," $x\n";
+		}
+	}
+	exit $exit;
+}
