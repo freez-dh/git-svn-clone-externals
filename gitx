@@ -62,9 +62,9 @@ class Clone(GitxCommand):
 		parser.add_argument("url")
 		parser.add_argument("name", nargs="?", default="")
 
-	def get_last_version(self):
+	def get_last_version(self, url):
 		return commands.getoutput(
-				"svn log -l 2 $remote_url| grep ^r | awk '{print $1}' | sed -n '2,2p' | sed 's/^r//'")
+				"svn log -l 2 %s| grep ^r | awk '{print $1}' | sed -n '2,2p' | sed 's/^r//'" % url)
 
 	def run(self):
 		url = self.options.url
@@ -77,7 +77,7 @@ class Clone(GitxCommand):
 				sys.exit(1)
 			name = splits[-1]
 		if "-r" not in self.remain_args:
-			version = "-r %s:HEAD" % self.get_last_version()
+			version = "-r %s:HEAD" % self.get_last_version(url)
 		command = "git svn clone %s %s %s %s" % (url, name, self.remain_args, version)
 		exit_code = os.system(command)
 		if exit_code != 0:
@@ -242,7 +242,10 @@ def main():
 	parser = argparse.ArgumentParser()
 	register_all_command(parser)
 	argcomplete.autocomplete(parser)
-	parse_result, remain_args = parser.parse_known_args()
+	try:
+		parse_result, remain_args = parser.parse_known_args()
+	except:
+		return os.system("git " + " ".join(sys.argv[1:]))
 	command = parse_result.command_cls(parse_result, remain_args)
 	return command.run()
 
