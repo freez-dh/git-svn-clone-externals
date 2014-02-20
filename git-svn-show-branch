@@ -1,0 +1,16 @@
+#! /bin/bash
+
+filepath=$(readlink -f $0)
+dirpath=$(dirname $filepath)
+commonspath=$dirpath"/"commons
+. $commonspath
+
+function show_branch {
+	echo -e "$greenc-----------start show $external_name---------"$endc
+	git branch 
+	echo -e "$greenc-----------end show $external_name---------"$endc
+}
+
+git branch
+foreach_externals show_branch
+
