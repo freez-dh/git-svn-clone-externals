@@ -1,0 +1,251 @@
+#! /usr/bin/python2.7
+#-*- coding: utf-8 -*-
+
+# 整合git跟reviewboard，整合git与svnx，使得不用修改svn hook就能够按照原来的方式提交代码
+# 整合跟svn:externals有关的一些脚本:
+# .git-svn-clone-externals 在git-svn分支上取得所有的svn:externals CLONE到.git_externals目录并且做好相应的符号链接到正确目录
+# .git-svn-branch 创建包含externals的在内的分支
+# .git-svn-delete-branch 删除分支，也同时删除externals下的分支
+# .git-svn-externals-check 检测externals是否有未comit或者未push到svn服务器的内容
+# .git-svn-externals-update 更新所有的externals到SVN最新版本
+# .git-svn-merge-branch merge包含externals在内的branch到当前working branch
+# .git-svn-switch-branch 切换包含externals在内到分支
+# .git-svn-update-all 更新所有的内容到SVN最新版本
+# pr post review到review board
+# ci commit改变到svn仓库
+
+import os
+import sys
+import argparse
+import inspect
+import commands
+
+try:
+	import argcomplete
+except:
+	class argcomplete(object):
+		@classmethod
+		def autocomplete(*args):
+			pass
+
+class GitxCommand(object):
+	@classmethod
+	def get_command_name(cls):
+		raise RuntimeError
+
+	@classmethod
+	def get_description(cls):
+		return ""
+
+	@classmethod
+	def parse_args(cls, parser):
+		pass
+
+	def __init__(self, options, remain_args):
+		self.options = options
+		self.remain_args = " ".join(remain_args)
+
+	def run(self):
+		return 1
+
+class Clone(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "clone"
+
+	@classmethod
+	def get_description(cls):
+		return "clone svn and externals"
+
+	@classmethod
+	def parse_args(cls, parser):
+		parser.add_argument("url")
+		parser.add_argument("name", nargs="?", default="")
+
+	def get_last_version(self):
+		return commands.getoutput(
+				"svn log -l 2 $remote_url| grep ^r | awk '{print $1}' | sed -n '2,2p' | sed 's/^r//'")
+
+	def run(self):
+		url = self.options.url
+		if self.options.name != "":
+			name = self.options.name
+		else:
+			splits = url.split("/")
+			if len(splits) == 0:
+				sys.stderr.write("url %s is not valid\n" % url)
+				sys.exit(1)
+			name = splits[-1]
+		if "-r" not in self.remain_args:
+			version = "-r %s:HEAD" % self.get_last_version()
+		command = "git svn clone %s %s %s %s" % (url, name, self.remain_args, version)
+		exit_code = os.system(command)
+		if exit_code != 0:
+			return exit_code
+		return os.system("cd %s;git-svn-clone-externals" % name)
+
+class CloneExternals(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "clonee"
+
+	@classmethod
+	def get_description(cls):
+		return "clone externals into .git_externals and link them to proper path"
+
+	def run(self):
+		return os.system("git-svn-clone-externals")
+
+class CreateBranch(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "create_branch"
+
+	@classmethod
+	def get_description(cls):
+		return "create git branch including externals"
+
+	@classmethod
+	def parse_args(cls, parser):
+		parser.add_argument("branch_name")
+		parser.add_argument("-n", "-noswitch", action = "store_true", default = False,
+				help = "do not switch to new branch after create")
+
+	def run(self):
+		exit_code = os.system("git-svn-branch %s" % self.options.branch_name)
+		if exit_code != 0:
+			return exit_code
+		if self.options.n:
+			return 0
+		return os.system("git-svn-switch-branch " + self.options.branch_name)
+
+class DeleteBranch(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "delete_branch"
+
+	@classmethod
+	def get_description(cls):
+		return "delete branch including externals"
+
+	@classmethod
+	def parse_args(cls, parser):
+		parser.add_argument("branch_name")
+		parser.add_argument("-D", action = "store_true", default = False,
+				help = "force delete branch")
+
+	def run(self):
+		extra = ""
+		if self.options.D:
+			extra = "-D"
+		return os.system("git-svn-delete-branch %s %s" % (self.options.branch_name, extra))
+
+class CheckExternals(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "check_externals"
+
+	@classmethod
+	def get_description(cls):
+		return "check externals uncommitted or unpushed changes"
+
+	def run(self):
+		return os.system("git-svn-externals-check")
+
+class UpdateExternals(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "update_externals"
+
+	@classmethod
+	def get_description(cls):
+		return "update externals"
+
+	def run(self):
+		return os.system("git-svn-externals-update")
+
+class Merge(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "merge"
+
+	@classmethod
+	def get_description(cls):
+		return "merge branch to this working tree with externals"
+
+	@classmethod
+	def parse_args(cls, parser):
+		parser.add_argument("branch_name")
+
+	def run(self):
+		return os.system("git-svn-merge-branch %s" % self.options.branch_name)
+
+class SwitchBranch(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "switch_branch"
+
+	@classmethod
+	def get_description(cls):
+		return "switch branch to with externals"
+
+	@classmethod
+	def parse_args(cls, parser):
+		parser.add_argument("branch_name")
+
+	def run(self):
+		return os.system("git-svn-switch-branch %s" % self.options.branch_name)
+
+class Update(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "update"
+
+	@classmethod
+	def get_description(cls):
+		return "update to svn HEAD"
+
+	def run(self):
+		return os.system("git-svn-update-all")
+
+class ShowBranch(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "show_branch"
+
+	@classmethod
+	def get_description(cls):
+		return "show branch include externals"
+
+	def run(self):
+		return os.system("git-svn-show-branch")
+
+def add_command(subparsers, command_cls):
+	cname = command_cls.get_command_name()
+	desc = command_cls.get_description()
+	command_parser = subparsers.add_parser(cname, help = desc)
+	command_cls.parse_args(command_parser)
+	command_parser.set_defaults(command_cls = command_cls)
+
+def register_all_command(parser):
+	mod = sys.modules[__name__]
+	subparsers = parser.add_subparsers(help = "sub command helps")
+	for obj_name in dir(mod):
+		obj = getattr(mod, obj_name)
+		if not inspect.isclass(obj) or not issubclass(obj, GitxCommand):
+			continue
+		if obj is GitxCommand:
+			continue
+		add_command(subparsers, obj)
+
+def main():
+	parser = argparse.ArgumentParser()
+	register_all_command(parser)
+	argcomplete.autocomplete(parser)
+	parse_result, remain_args = parser.parse_known_args()
+	command = parse_result.command_cls(parse_result, remain_args)
+	return command.run()
+
+if __name__ == "__main__":
+	sys.exit(main())
+
