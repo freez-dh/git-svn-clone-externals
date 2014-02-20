@@ -1,7 +1,9 @@
 #! /bin/bash
 
-toplevel_directory="$(git rev-parse --show-cdup)"
-[ -n "$toplevel_directory" ] && { echo "please run from the toplevel directory"; exit 1; }
+filepath=$(readlink -f $0)
+dirpath=$(dirname $filepath)
+commonspath=$dirpath"/"commons
+. $commonspath
 
 git svn rebase
 if [ $? != 0 ];

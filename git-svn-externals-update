@@ -1,6 +1,7 @@
 #!/bin/bash
 
-filepath=$(readlink $0)
+filepath=$(readlink -f $0)
+echo $filepath
 dirpath=$(dirname $filepath)
 commonspath=$dirpath"/"commons
 . $commonspath
