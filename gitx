@@ -1,4 +1,4 @@
-#! /usr/bin/python2.7
+#! /usr/bin/env python
 #-*- coding: utf-8 -*-
 
 # 整合git跟reviewboard，整合git与svnx，使得不用修改svn hook就能够按照原来的方式提交代码
@@ -219,6 +219,41 @@ class ShowBranch(GitxCommand):
 
 	def run(self):
 		return os.system("git-svn-show-branch")
+
+class PostReview(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "pr"
+
+	@classmethod
+	def get_description(cls):
+		return "post changes against svn to review board"
+
+	@classmethod
+	def parse_args(cls, parser):
+		parser.add_argument("change_name")
+
+	def run(self):
+		return os.system("git-svn-pr postreview " + self.options.change_name)
+
+class Commit(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "ci"
+
+	@classmethod
+	def get_description(cls):
+		return "ci commited changes to svn"
+
+	@classmethod
+	def parse_args(cls, parser):
+		parser.add_argument("change_name")
+
+	def run(self):
+		exit_code = os.system("svnx ci -f " + self.options.change_name)
+		if exit_code != 0:
+			return exit_code
+		return os.system("git svn dcommit " + self.remain_args)
 
 def add_command(subparsers, command_cls):
 	cname = command_cls.get_command_name()
