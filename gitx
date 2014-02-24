@@ -28,6 +28,18 @@ except:
 		def autocomplete(*args):
 			pass
 
+def DoCommand(command):
+	exit_code = os.system(command)
+	if exit_code != 0:
+		sys.exit(exit_code)
+	return exit_code
+
+def DoCommands(*args):
+	exit_code = 0
+	for command in args:
+		exit_code = DoCommand(command)
+	return exit_code
+
 class GitxCommand(object):
 	@classmethod
 	def get_command_name(cls):
@@ -79,10 +91,7 @@ class Clone(GitxCommand):
 		if "-r" not in self.remain_args:
 			version = "-r %s:HEAD" % self.get_last_version(url)
 		command = "git svn clone %s %s %s %s" % (url, name, self.remain_args, version)
-		exit_code = os.system(command)
-		if exit_code != 0:
-			return exit_code
-		return os.system("cd %s;git-svn-clone-externals" % name)
+		return DoCommands(command, "cd %s;git-svn-clone-externals" % name)
 
 class CloneExternals(GitxCommand):
 	@classmethod
@@ -250,10 +259,10 @@ class Commit(GitxCommand):
 		parser.add_argument("change_name")
 
 	def run(self):
-		exit_code = os.system("svnx ci -f " + self.options.change_name)
-		if exit_code != 0:
-			return exit_code
-		return os.system("git svn dcommit " + self.remain_args)
+		return DoCommands(
+				"svnx ci -f " + self.options.change_name,
+				"git svn dcommit " + self.remain_args,
+				"git-svn-externals-check")
 
 class Checkout(GitxCommand):
 	@classmethod
@@ -293,6 +302,18 @@ class Checkout(GitxCommand):
 			return os.system("git checkout %s %s" % (
 				os.path.join(ra_path, file_name), self.remain_args))
 		return os.system("git checkout %s %s" % (self.options.path, self.remain_args))
+
+class Status(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "stx"
+
+	@classmethod
+	def get_description(cls):
+		return "git status with check externals status and unpushed content"
+
+	def run(self):
+		return DoCommands("git status", "git-svn-check-unpushed", "git-svn-externals-check")
 
 def add_command(subparsers, command_cls):
 	cname = command_cls.get_command_name()
