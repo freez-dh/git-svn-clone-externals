@@ -255,6 +255,45 @@ class Commit(GitxCommand):
 			return exit_code
 		return os.system("git svn dcommit " + self.remain_args)
 
+class Checkout(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "checkout"
+
+	@classmethod
+	def get_description(cls):
+		return "git checkout with doing right with externals"
+
+	@classmethod
+	def parse_args(cls, parser):
+		parser.add_argument("path", default = "", nargs = "?")
+
+	def run(self):
+		if self.options.path == "":
+			return os.system("git checkout " + self.remain_args)
+		if not os.path.exists(self.options.path):
+			# may be branch
+			return os.system("git checkout " + self.remain_args)
+		# find the git directory
+		git_dir = ".git"
+		cur_path = self.options.path
+		ra_path = ""
+		file_name = os.path.basename(self.options.path)
+		while True:
+			if not os.path.exists(cur_path):
+				break
+			git_dir_path = os.path.join(cur_path, git_dir)
+			if not os.path.exists(git_dir_path):
+				old_cur_path = cur_path
+				cur_path = os.path.abspath(os.path.join(cur_path, os.pardir))
+				if not (old_cur_path == self.options.path and file_name != ""):
+					ra_path = os.path.join(ra_path, os.pardir)
+				continue
+			os.chdir(cur_path)
+			return os.system("git checkout %s %s" % (
+				os.path.join(ra_path, file_name), self.remain_args))
+		return os.system("git checkout %s %s" % (self.options.path, self.remain_args))
+
 def add_command(subparsers, command_cls):
 	cname = command_cls.get_command_name()
 	desc = command_cls.get_description()
@@ -277,10 +316,7 @@ def main():
 	parser = argparse.ArgumentParser()
 	register_all_command(parser)
 	argcomplete.autocomplete(parser)
-	try:
-		parse_result, remain_args = parser.parse_known_args()
-	except:
-		return os.system("git " + " ".join(sys.argv[1:]))
+	parse_result, remain_args = parser.parse_known_args()
 	command = parse_result.command_cls(parse_result, remain_args)
 	return command.run()
 
