@@ -28,6 +28,8 @@ except:
 		def autocomplete(*args):
 			pass
 
+EXTERNALS_DIR_NAME = ".git_externals"
+
 def DoCommand(command):
 	exit_code = os.system(command)
 	if exit_code != 0:
@@ -39,6 +41,43 @@ def DoCommands(*args):
 	for command in args:
 		exit_code = DoCommand(command)
 	return exit_code
+
+def GetGitRootDir():
+	externals_dir = os.getcwd()
+	while os.path.exists(externals_dir):
+		name = os.path.join(externals_dir, EXTERNALS_DIR_NAME)
+		if os.path.exists(name) and os.path.isdir(name):
+			break
+		externals_dir = os.path.join(externals_dir, os.path.pardir)
+	if not os.path.exists(externals_dir):
+		raise RuntimeError("Can't find git externals directory")
+	externals_dir = os.path.abspath(externals_dir)
+	return externals_dir
+
+def ChdirGitRoot():
+	path = GetGitRootDir()
+	os.chdir(path)
+
+def _DoFunc(func, gitdir):
+	oldcwd = os.getcwd()
+	os.chdir(os.path.join(gitdir, os.path.pardir))
+	try:
+		func()
+	finally:
+		os.chdir(oldcwd)
+
+def ForEachExternal(func):
+	cwd = os.getcwd()
+	externals_dir = os.path.join(GetGitRootDir(), EXTERNALS_DIR_NAME)
+	os.chdir(externals_dir)
+	try:
+		gitdirs = commands.getoutput("find * -type d -name .git")
+		for gitdir in gitdirs.split("\n"):
+			if not os.path.isdir(gitdir):
+				continue
+			_DoFunc(func, gitdir)
+	finally:
+		os.chdir(cwd)
 
 class GitxCommand(object):
 	@classmethod
@@ -341,6 +380,67 @@ class Status(GitxCommand):
 
 	def run(self):
 		return DoCommands("git status", "git-svn-check-unpushed", "git-svn-externals-check")
+
+class Stash(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "stash"
+
+	@classmethod
+	def get_description(cls):
+		return "git do stash with externals"
+
+	def run(self):
+		ChdirGitRoot()
+		DoCommand("git stash " + self.remain_args)
+		def func():
+			DoCommand("git stash " + self.remain_args)
+		ForEachExternal(func)
+		return 0
+
+class Diff(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "diff"
+
+	@classmethod
+	def get_description(cls):
+		return "diff"
+
+	@classmethod
+	def parse_args(cls, parser):
+		parser.add_argument("-a", action = "store_true", default = False,
+				help = "show git diff with externals")
+
+	def run(self):
+		ChdirGitRoot()
+		DoCommand("git diff " + self.remain_args)
+		if not self.options.a:
+			return
+		def func():
+			DoCommand("git diff " + self.remain_args)
+		ForEachExternal(func)
+		return 0
+
+class Info(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "info"
+
+	@classmethod
+	def get_description(cls):
+		return "show git svn info"
+
+	@classmethod
+	def parse_args(cls, parser):
+		parser.add_argument("-a", action = "store_true", default = False,
+				help = "show git svn info with externals")
+
+	def run(self):
+		DoCommand("git svn info " + self.remain_args)
+		if not self.options.a:
+			return
+		ForEachExternal(lambda : DoCommand("git svn info " + self.remain_args))
 
 def add_command(subparsers, command_cls):
 	cname = command_cls.get_command_name()
