@@ -420,13 +420,13 @@ class Diff(GitxCommand):
 
 	@classmethod
 	def parse_args(cls, parser):
-		parser.add_argument("-a", action = "store_true", default = False,
-				help = "show git diff with externals")
+		parser.add_argument("-na", action = "store_true", default = False,
+				help = "do not show git diff with externals")
 
 	def run(self):
 		ChdirGitRoot()
 		DoCommand("git diff " + self.remain_args)
-		if not self.options.a:
+		if self.options.na:
 			return
 		def func():
 			DoCommand("git diff " + self.remain_args)
@@ -444,12 +444,12 @@ class Info(GitxCommand):
 
 	@classmethod
 	def parse_args(cls, parser):
-		parser.add_argument("-a", action = "store_true", default = False,
-				help = "show git svn info with externals")
+		parser.add_argument("-na", action = "store_true", default = False,
+				help = "do not show git svn info with externals")
 
 	def run(self):
 		DoCommand("git svn info " + self.remain_args)
-		if not self.options.a:
+		if self.options.na:
 			return
 		ForEachExternal(lambda : DoCommand("git svn info " + self.remain_args))
 
