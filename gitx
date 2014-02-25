@@ -275,35 +275,60 @@ class Checkout(GitxCommand):
 
 	@classmethod
 	def parse_args(cls, parser):
-		parser.add_argument("path", default = "", nargs = "?")
+		action = parser.add_argument("path", default = "", nargs = "*")
+		try:
+			import IPython
+		except ImportError:
+			return
+		action.completer = IPython.core.completer.Completer()
 
-	def run(self):
-		if self.options.path == "":
+	def _run_co_branch(self):
+		if len(self.options.path) == 0:
 			return os.system("git checkout " + self.remain_args)
-		if not os.path.exists(self.options.path):
+		if len(self.options.path) != 1:
+			return None
+		path = self.options.path[0]
+		if path == "":
+			return os.system("git checkout " + self.remain_args)
+		if not os.path.exists(path):
 			# may be branch
 			return os.system("git checkout " + self.remain_args)
+		return None
+
+	def run(self):
+		exit_code = self._run_co_branch()
+		if exit_code is not None:
+			return exit_code
+		for path in self.options.path:
+			self._co_file(path)
+		return 0
+
+	def _co_file(self, path):
 		# find the git directory
 		git_dir = ".git"
-		abspath = os.path.abspath(self.options.path)
+		abspath = os.path.abspath(path)
 		cur_path = abspath
 		ra_path = ""
-		file_name = os.path.basename(self.options.path)
-		while True:
-			if not os.path.exists(cur_path):
-				break
-			git_dir_path = os.path.join(cur_path, git_dir)
-			if not os.path.exists(git_dir_path):
-				old_cur_path = cur_path
-				cur_path = os.path.abspath(os.path.join(cur_path, os.pardir))
-				dirname = old_cur_path.replace(cur_path + os.path.sep, "")
-				if not (old_cur_path == abspath and file_name != ""):
-					ra_path = os.path.join(dirname, ra_path)
-				continue
-			os.chdir(cur_path)
-			return os.system("git checkout %s %s" % (
-				os.path.join(ra_path, file_name), self.remain_args))
-		return os.system("git checkout %s %s" % (self.options.path, self.remain_args))
+		file_name = os.path.basename(path)
+		cwd = os.getcwd()
+		try:
+			while True:
+				if not os.path.exists(cur_path):
+					break
+				git_dir_path = os.path.join(cur_path, git_dir)
+				if not os.path.exists(git_dir_path):
+					old_cur_path = cur_path
+					cur_path = os.path.abspath(os.path.join(cur_path, os.pardir))
+					dirname = old_cur_path.replace(cur_path + os.path.sep, "")
+					if not (old_cur_path == abspath and file_name != ""):
+						ra_path = os.path.join(dirname, ra_path)
+					continue
+				os.chdir(cur_path)
+				return DoCommand("git checkout %s %s" % (
+					os.path.join(ra_path, file_name), self.remain_args))
+			return DoCommand("git checkout %s %s" % (path, self.remain_args))
+		finally:
+			os.chdir(cwd)
 
 class Status(GitxCommand):
 	@classmethod
