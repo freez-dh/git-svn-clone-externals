@@ -42,6 +42,20 @@ def DoCommands(*args):
 		exit_code = DoCommand(command)
 	return exit_code
 
+# 得到路径对应的git根目录
+def GetCurGitDir(path):
+	git_dir = ".git"
+	abspath = os.path.abspath(path)
+	cur_path = abspath
+	while True:
+		if not os.path.exists(cur_path):
+			break
+		git_dir_path = os.path.join(cur_path, git_dir)
+		if os.path.exists(git_dir_path):
+			return cur_path
+		cur_path = os.path.abspath(os.path.join(cur_path, os.pardir))
+	return None
+
 def GetGitRootDir():
 	externals_dir = os.getcwd()
 	while os.path.exists(externals_dir):
@@ -79,6 +93,28 @@ def ForEachExternal(func):
 	finally:
 		os.chdir(cwd)
 
+def AddArgumentWithIPythonCompleter(parser, *args, **kwargs):
+	action = parser.add_argument(*args, **kwargs)
+	try:
+		import IPython
+	except ImportError:
+		return
+	action.completer = IPython.core.completer.Completer()
+
+def DoCommandInProperPath(command, path, get_path_fail_func = None):
+	git_root_path = GetCurGitDir(path)
+	if git_root_path is None:
+		if get_path_fail_func is not None:
+			get_path_fail_func()
+		return
+	ra_path = os.path.abspath(path).replace(git_root_path + os.path.sep, "")
+	cwd = os.getcwd()
+	os.chdir(git_root_path)
+	try:
+		return command(ra_path)
+	finally:
+		os.chdir(cwd)
+
 class GitxCommand(object):
 	@classmethod
 	def get_command_name(cls):
@@ -94,6 +130,7 @@ class GitxCommand(object):
 
 	def __init__(self, options, remain_args):
 		self.options = options
+		remain_args = map(lambda arg : arg if " " not in arg else '"%s"' % arg, remain_args)
 		self.remain_args = " ".join(remain_args)
 
 	def run(self):
@@ -284,7 +321,7 @@ class PostReview(GitxCommand):
 	def run(self):
 		return os.system("git-svn-pr postreview " + self.options.change_name)
 
-class Commit(GitxCommand):
+class Ci(GitxCommand):
 	@classmethod
 	def get_command_name(cls):
 		return "ci"
@@ -314,12 +351,7 @@ class Checkout(GitxCommand):
 
 	@classmethod
 	def parse_args(cls, parser):
-		action = parser.add_argument("path", default = "", nargs = "*")
-		try:
-			import IPython
-		except ImportError:
-			return
-		action.completer = IPython.core.completer.Completer()
+		AddArgumentWithIPythonCompleter(parser, "path", default = "", nargs = "*")
 
 	def _run_co_branch(self):
 		if len(self.options.path) == 0:
@@ -343,31 +375,10 @@ class Checkout(GitxCommand):
 		return 0
 
 	def _co_file(self, path):
-		# find the git directory
-		git_dir = ".git"
-		abspath = os.path.abspath(path)
-		cur_path = abspath
-		ra_path = ""
-		file_name = os.path.basename(path)
-		cwd = os.getcwd()
-		try:
-			while True:
-				if not os.path.exists(cur_path):
-					break
-				git_dir_path = os.path.join(cur_path, git_dir)
-				if not os.path.exists(git_dir_path):
-					old_cur_path = cur_path
-					cur_path = os.path.abspath(os.path.join(cur_path, os.pardir))
-					dirname = old_cur_path.replace(cur_path + os.path.sep, "")
-					if not (old_cur_path == abspath and file_name != ""):
-						ra_path = os.path.join(dirname, ra_path)
-					continue
-				os.chdir(cur_path)
-				return DoCommand("git checkout %s %s" % (
-					os.path.join(ra_path, file_name), self.remain_args))
-			return DoCommand("git checkout %s %s" % (path, self.remain_args))
-		finally:
-			os.chdir(cwd)
+		DoCommandInProperPath(
+				lambda ra_path : DoCommand("git checkout %s %s" % (ra_path, self.remain_args)),
+				path,
+				lambda : DoCommand("git checkout %s %s" % (path, self.remain_args)))
 
 class Status(GitxCommand):
 	@classmethod
@@ -441,6 +452,86 @@ class Info(GitxCommand):
 		if not self.options.a:
 			return
 		ForEachExternal(lambda : DoCommand("git svn info " + self.remain_args))
+
+class Add(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "add"
+
+	@classmethod
+	def get_description(cls):
+		return "add file contents to index"
+
+	@classmethod
+	def parse_args(cls, parser):
+		AddArgumentWithIPythonCompleter(parser, "path", default = "", nargs = "*")
+
+	def run(self):
+		if len(self.options.path) == 0:
+			return DoCommand("git add")
+		for path in self.options.path:
+			DoCommandInProperPath(
+					lambda ra_path : DoCommand("git add %s %s" % (ra_path, self.remain_args)),
+					path,
+					lambda : DoCommand("git add %s %s" % (path, self.remain_args)))
+
+class Reset(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "reset"
+
+	@classmethod
+	def get_description(cls):
+		return "Reset current HEAD to the specified state"
+
+	@classmethod
+	def parse_args(cls, parser):
+		AddArgumentWithIPythonCompleter(parser, "path", default = "", nargs = "*")
+
+	def run(self):
+		if len(self.options.path) == 0:
+			return DoCommand("git reset")
+		for path in self.options.path:
+			DoCommandInProperPath(
+					lambda ra_path : DoCommand("git reset %s %s" % (ra_path, self.remain_args)),
+					path,
+					lambda : DoCommand("git reset %s %s" % (path, self.remain_args)))
+
+class Rm(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "rm"
+
+	@classmethod
+	def get_description(cls):
+		return "Remove files from the working tree and from the index"
+
+	@classmethod
+	def parse_args(cls, parser):
+		AddArgumentWithIPythonCompleter(parser, "path", default = "", nargs = "*")
+
+	def run(self):
+		if len(self.options.path) == 0:
+			return DoCommand("git rm")
+		for path in self.options.path:
+			DoCommandInProperPath(
+					lambda ra_path : DoCommand("git rm %s %s" % (ra_path, self.remain_args)),
+					path,
+					lambda : DoCommand("git rm %s %s" % (path, self.remain_args)))
+
+class Commit(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "commit"
+
+	@classmethod
+	def get_description(cls):
+		return "Record changes to the repository"
+
+	def run(self):
+		ChdirGitRoot()
+		DoCommand("git commit " + self.remain_args)
+		ForEachExternal(lambda : DoCommand("git commit " + self.remain_args))
 
 def add_command(subparsers, command_cls):
 	cname = command_cls.get_command_name()
