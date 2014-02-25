@@ -285,7 +285,8 @@ class Checkout(GitxCommand):
 			return os.system("git checkout " + self.remain_args)
 		# find the git directory
 		git_dir = ".git"
-		cur_path = self.options.path
+		abspath = os.path.abspath(self.options.path)
+		cur_path = abspath
 		ra_path = ""
 		file_name = os.path.basename(self.options.path)
 		while True:
@@ -295,8 +296,9 @@ class Checkout(GitxCommand):
 			if not os.path.exists(git_dir_path):
 				old_cur_path = cur_path
 				cur_path = os.path.abspath(os.path.join(cur_path, os.pardir))
-				if not (old_cur_path == self.options.path and file_name != ""):
-					ra_path = os.path.join(ra_path, os.pardir)
+				dirname = old_cur_path.replace(cur_path + os.path.sep, "")
+				if not (old_cur_path == abspath and file_name != ""):
+					ra_path = os.path.join(dirname, ra_path)
 				continue
 			os.chdir(cur_path)
 			return os.system("git checkout %s %s" % (
