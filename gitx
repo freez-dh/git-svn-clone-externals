@@ -30,9 +30,9 @@ except:
 
 EXTERNALS_DIR_NAME = ".git_externals"
 
-def DoCommand(command):
+def DoCommand(command, *except_codes):
 	exit_code = os.system(command)
-	if exit_code != 0:
+	if exit_code != 0 and exit_code not in except_codes:
 		sys.exit(exit_code)
 	return exit_code
 
@@ -319,7 +319,9 @@ class PostReview(GitxCommand):
 		parser.add_argument("change_name")
 
 	def run(self):
-		return os.system("git-svn-pr postreview " + self.options.change_name)
+		command = ("git-svn-pr postreview " + self.options.change_name
+				+ " " + self.remain_args)
+		return os.system(command)
 
 class Ci(GitxCommand):
 	@classmethod
@@ -335,9 +337,12 @@ class Ci(GitxCommand):
 		parser.add_argument("change_name")
 
 	def run(self):
+		version = "HEAD"
+		if len(self.remain_args) != 0:
+			version = self.remain_args
 		return DoCommands(
 				"svnx ci -f " + self.options.change_name,
-				"git svn dcommit " + self.remain_args,
+				"git svn dcommit %s %s" % (version, self.options.change_name),
 				"git-svn-externals-check")
 
 class Checkout(GitxCommand):
@@ -530,8 +535,8 @@ class Commit(GitxCommand):
 
 	def run(self):
 		ChdirGitRoot()
-		DoCommand("git commit " + self.remain_args)
-		ForEachExternal(lambda : DoCommand("git commit " + self.remain_args))
+		DoCommand("git commit " + self.remain_args, 256)
+		ForEachExternal(lambda : DoCommand("git commit " + self.remain_args, 256))
 
 def add_command(subparsers, command_cls):
 	cname = command_cls.get_command_name()

@@ -363,18 +363,9 @@ sub cmd_postreview {
 			"pr", $change_name,
 			"-l".$tmp_filename,
 			"-r".$re_path);
-		my %svnx_options = (f => $_force,
-			p => $_publish,
-			d => $_debug,
-			"t".($_ticket or "") => $_ticket,
-			m => $_log,
-
-		);
-		while (my ($option_name, $option_value) = each%svnx_options) {
-			if (defined($option_value)) {
-				push(@svnx_cmd, "-".$option_name)
-			}
-		}
+		for (my $i = 0; $i < @ARGV; $i++) {
+			push(@svnx_cmd, $ARGV[$i])
+		};
 		system(@svnx_cmd);
 		$prefix++;
 	}
