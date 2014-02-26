@@ -13,6 +13,7 @@ use Git::SVN;
 use Git::SVN::Editor;
 use Git::SVN::Ra;
 use Git::SVN::Migration;
+use Git::SVN::Prompt;
 
 use Git::SVN::Utils qw(
 	fatal
