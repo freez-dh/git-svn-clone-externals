@@ -19,6 +19,7 @@ import sys
 import argparse
 import inspect
 import commands
+import tempfile
 
 try:
 	import argcomplete
@@ -29,6 +30,19 @@ except:
 			pass
 
 EXTERNALS_DIR_NAME = ".git_externals"
+
+FOREGROUND_RED = "\033[31m" # text color contains red.
+ENDC = '\033[0m'
+
+def DoCommandStatusOutput(command, *except_codes):
+	exit_code, output = commands.getstatusoutput(command)
+	if exit_code != 0 and exit_code not in except_codes:
+		sys.stdout.write(output)
+		sys.exit(exit_code)
+	return exit_code, output
+
+def DoCommandOutput(command, *except_codes):
+	return DoCommandStatusOutput(command, *except_codes)[1]
 
 def DoCommand(command, *except_codes):
 	exit_code = os.system(command)
@@ -319,9 +333,62 @@ class PostReview(GitxCommand):
 		parser.add_argument("change_name")
 
 	def run(self):
-		command = ("git-svn-pr postreview " + self.options.change_name
-				+ " " + self.remain_args)
-		return os.system(command)
+		self.first_try = True
+		self.do()
+
+	def do(self):
+		lines = DoCommandOutput("git svn dcommit --dry-run").split("\n")
+		vers = [line for line in lines if line.startswith("diff-tree")]
+		if len(vers) == 0:
+			sys.stdout.write("No commit need push to svn\n")
+			return 0
+		if len(vers) > 1 and self.first_try:
+			return self.try_auto_squash()
+		return self.do_pr(vers[0])
+
+	def try_auto_squash(self):
+		ans = raw_input("There are more one commits unpushed to svn, auto squash them together?[Y/N]")
+		ans = ans.lower()
+		if ans == "n":
+			sys.stderr.write("if you want to solve this manually,"
+					"run %s'git rebase git-svn -i'%s and squash all unpushed commits to single one.\n" % (FOREGROUND_RED, ENDC))
+			return 1
+		self.auto_squash()
+		self.first_try = False
+		self.do()
+		return 0
+
+	def do_pr(self, ver_line):
+		_tag, last_ver, ver = ver_line.split()
+		file_lists = DoCommandOutput("git diff %s %s --name-status" % (last_ver, ver))
+		output = DoCommandOutput("git svn info")
+		url, resp_root = None, None
+		url_tag = "URL:"
+		root_tag = "Repository Root:"
+		for line in output.split("\n"):
+			if line.startswith(url_tag):
+				url = line.replace(url_tag, "", 1).strip()
+			if line.startswith(root_tag):
+				resp_root = line.replace(root_tag, "", 1).strip()
+		if url is None or resp_root is None:
+			sys.stderr.write("Can't find svn url info\n")
+			return 1
+		relative_path = url.replace(resp_root, "", 1)
+		tmp_file = tempfile.NamedTemporaryFile(delete = False)
+		tmp_file.write(file_lists + "\n")
+		tmp_file.close()
+		command = "svnx pr %s -l %s -r %s" % (
+			self.options.change_name,
+			tmp_file.name,
+			relative_path,)
+		DoCommand(command)
+		return 0
+
+	def auto_squash(self):
+		old_editor = DoCommandOutput("git config --global --get core.editor")
+		DoCommand("git config --global core.editor git-svn-squash-editor")
+		DoCommand("git rebase git-svn -i")
+		DoCommand("git config --global core.editor %s" % old_editor)
 
 class Ci(GitxCommand):
 	@classmethod
