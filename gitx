@@ -34,10 +34,18 @@ EXTERNALS_DIR_NAME = ".git_externals"
 FOREGROUND_RED = "\033[31m" # text color contains red.
 ENDC = '\033[0m'
 
+_before_exit = None
+
+def exit(code):
+	if _before_exit is not None:
+		_before_exit()
+	sys.exit(code)
+
 def DoCommandStatusOutput(command, *except_codes):
 	exit_code, output = commands.getstatusoutput(command)
 	if exit_code != 0 and exit_code not in except_codes:
 		sys.stdout.write(output)
+		sys.stderr.write((FOREGROUND_RED + "Exit because '%s' failed,code:%s\n" + ENDC) % (command, exit_code))
 		sys.exit(exit_code)
 	return exit_code, output
 
@@ -47,6 +55,7 @@ def DoCommandOutput(command, *except_codes):
 def DoCommand(command, *except_codes):
 	exit_code = os.system(command)
 	if exit_code != 0 and exit_code not in except_codes:
+		sys.stderr.write((FOREGROUND_RED + "Exit because '%s' failed,code:%s\n" + ENDC) % (command, exit_code))
 		sys.exit(exit_code)
 	return exit_code
 
@@ -334,6 +343,7 @@ class PostReview(GitxCommand):
 
 	def run(self):
 		self.first_try = True
+		ChdirGitRoot()
 		self.do()
 
 	def do(self):
@@ -349,14 +359,14 @@ class PostReview(GitxCommand):
 	def try_auto_squash(self):
 		ans = raw_input("There are more one commits unpushed to svn, auto squash them together?[Y/N]")
 		ans = ans.lower()
-		if ans == "n":
-			sys.stderr.write("if you want to solve this manually,"
-					"run %s'git rebase git-svn -i'%s and squash all unpushed commits to single one.\n" % (FOREGROUND_RED, ENDC))
-			return 1
-		self.auto_squash()
-		self.first_try = False
-		self.do()
-		return 0
+		if ans == "y":
+			self.auto_squash()
+			self.first_try = False
+			self.do()
+			return 0
+		sys.stderr.write("if you want to solve this manually,"
+				"run %s'git rebase git-svn -i'%s and squash all unpushed commits to single one.\n" % (FOREGROUND_RED, ENDC))
+		return 1
 
 	def do_pr(self, ver_line):
 		_tag, last_ver, ver = ver_line.split()
@@ -385,10 +395,13 @@ class PostReview(GitxCommand):
 		return 0
 
 	def auto_squash(self):
-		old_editor = DoCommandOutput("git config --global --get core.editor")
+		def func():
+			# 潜规则用VIM
+			DoCommand("git config --global core.editor vim")
+		global _before_exit
+		_before_exit = func
 		DoCommand("git config --global core.editor git-svn-squash-editor")
 		DoCommand("git rebase git-svn -i")
-		DoCommand("git config --global core.editor %s" % old_editor)
 
 class Ci(GitxCommand):
 	@classmethod
@@ -632,5 +645,11 @@ def main():
 	return command.run()
 
 if __name__ == "__main__":
-	sys.exit(main())
+	try:
+		sys.exit(main())
+	except:
+		raise
+	finally:
+		if _before_exit is not None:
+			_before_exit()
 
