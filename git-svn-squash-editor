@@ -1,0 +1,27 @@
+#! /usr/bin/env python
+#-*- coding: utf-8 -*-
+
+import sys
+
+def main():
+	filename = sys.argv[1]
+	if filename.endswith("COMMIT_EDITMSG"):
+		return 0
+	res_lines = []
+	with open(filename, "r") as f:
+		is_first_line = True
+		for line in f:
+			if not line.startswith("pick"):
+				res_lines.append(line)
+				continue
+			if is_first_line:
+				is_first_line = False
+				res_lines.append(line)
+				continue
+			res_lines.append(line.replace("pick", "squash", 1))
+	with open(filename, "w+") as f:
+		f.write("\n".join(res_lines))
+	return 0
+
+if __name__ == "__main__":
+	sys.exit(main())
