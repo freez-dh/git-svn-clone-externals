@@ -391,6 +391,7 @@ class PostReview(GitxCommand):
 			self.options.change_name,
 			tmp_file.name,
 			relative_path,)
+		command += " " + self.remain_args
 		DoCommand(command)
 		return 0
 
