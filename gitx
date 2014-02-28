@@ -46,7 +46,7 @@ def DoCommandStatusOutput(command, *except_codes):
 	if exit_code != 0 and exit_code not in except_codes:
 		sys.stdout.write(output)
 		sys.stderr.write((FOREGROUND_RED + "Exit because '%s' failed,code:%s\n" + ENDC) % (command, exit_code))
-		sys.exit(exit_code)
+		exit(exit_code)
 	return exit_code, output
 
 def DoCommandOutput(command, *except_codes):
@@ -56,7 +56,7 @@ def DoCommand(command, *except_codes):
 	exit_code = os.system(command)
 	if exit_code != 0 and exit_code not in except_codes:
 		sys.stderr.write((FOREGROUND_RED + "Exit because '%s' failed,code:%s\n" + ENDC) % (command, exit_code))
-		sys.exit(exit_code)
+		exit(exit_code)
 	return exit_code
 
 def DoCommands(*args):
@@ -185,7 +185,7 @@ class Clone(GitxCommand):
 			splits = url.split("/")
 			if len(splits) == 0:
 				sys.stderr.write("url %s is not valid\n" % url)
-				sys.exit(1)
+				exit(1)
 			name = splits[-1]
 		if "-r" not in self.remain_args:
 			version = "-r %s:HEAD" % self.get_last_version(url)
@@ -647,7 +647,7 @@ def main():
 
 if __name__ == "__main__":
 	try:
-		sys.exit(main())
+		exit(main())
 	except:
 		raise
 	finally:
