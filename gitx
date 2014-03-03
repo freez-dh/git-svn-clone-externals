@@ -634,6 +634,33 @@ class Commit(GitxCommand):
 		DoCommand("git commit " + self.remain_args, 256)
 		ForEachExternal(lambda : DoCommand("git commit " + self.remain_args, 256))
 
+class ExternalCommit(GitxCommand):
+	name2path = {
+			"share" : "logic/share",
+			"staticdata" : "logic/setting/staticdata",
+			"res" : "logic/setting/res",
+	}
+	@classmethod
+	def get_command_name(cls):
+		return "ecommit"
+
+	@classmethod
+	def get_description(cls):
+		return "Commit externals(%s) to svn" % (",".join(cls.name2path.keys()))
+
+	@classmethod
+	def parse_args(cls, parser):
+		pass
+
+	def run(self):
+		ChdirGitRoot()
+		for name, path in self.name2path.iteritems():
+			if not name in self.remain_args_list:
+				continue
+			DoCommandInProperPath(
+					lambda ra_path : DoCommand("git svn dcommit"),
+					path,)
+
 def add_command(subparsers, command_cls):
 	cname = command_cls.get_command_name()
 	desc = command_cls.get_description()
