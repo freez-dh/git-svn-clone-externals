@@ -661,6 +661,22 @@ class ExternalCommit(GitxCommand):
 					lambda ra_path : DoCommand("git svn dcommit"),
 					path,)
 
+class Version(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "version"
+
+	@classmethod
+	def get_description(cls):
+		return "git version of gitx"
+
+	def run(self):
+		with open("version", "r") as f:
+			ver = f.read()
+			if not ver.endswith("\n"):
+				ver += "\n"
+			sys.stdout.write(ver)
+
 def add_command(subparsers, command_cls):
 	cname = command_cls.get_command_name()
 	desc = command_cls.get_description()

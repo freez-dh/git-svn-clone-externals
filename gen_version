@@ -1,0 +1,10 @@
+#! /usr/bin/env python
+#-*- coding: utf-8 -*-
+
+import commands
+
+if __name__ == "__main__":
+	last_ver = commands.getoutput('''git log -1''')
+	with open("version", "w+") as f:
+		f.write(last_ver)
+
