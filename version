@@ -1,5 +1,5 @@
-commit 39ee44c455be338acdca3cdaf1c0e3d45537de54
+commit 45a9af7ce653b4c7cc664184c4982463d95d0221
 Author: freez-dh <denghui@126.com>
-Date:   Mon Mar 3 16:49:05 2014 +0800
+Date:   Mon Mar 3 17:02:37 2014 +0800
 
-    增加ecommit
+    增加VERSION指令
