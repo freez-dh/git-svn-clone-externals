@@ -138,6 +138,10 @@ def DoCommandInProperPath(command, path, get_path_fail_func = None):
 	finally:
 		os.chdir(cwd)
 
+def JoinArgs(args):
+	args = map(lambda arg : arg if " " not in arg else '"%s"' % arg, args)
+	return " ".join(args)
+
 class GitxCommand(object):
 	@classmethod
 	def get_command_name(cls):
@@ -153,8 +157,8 @@ class GitxCommand(object):
 
 	def __init__(self, options, remain_args):
 		self.options = options
-		remain_args = map(lambda arg : arg if " " not in arg else '"%s"' % arg, remain_args)
-		self.remain_args = " ".join(remain_args)
+		self.remain_args_list = remain_args
+		self.remain_args = JoinArgs(remain_args)
 
 	def run(self):
 		return 1
@@ -357,7 +361,7 @@ class PostReview(GitxCommand):
 		return self.do_pr(vers[0])
 
 	def try_auto_squash(self):
-		ans = raw_input("There are more one commits unpushed to svn, auto squash them together?[Y/N]")
+		ans = raw_input("There are more than one commits unpushed to svn, auto squash them together?[Y/N]")
 		ans = ans.lower()
 		if ans == "y":
 			self.auto_squash()
@@ -510,10 +514,21 @@ class Diff(GitxCommand):
 				help = "do not show git diff with externals")
 
 	def run(self):
-		ChdirGitRoot()
+		if self.remain_args == "":
+			return self.do_diff_global()
+		paths = [arg for arg in self.remain_args_list if os.path.exists(arg)]
+		# 转换为SET会不会丢掉一些重复的函数？
+		other_args = JoinArgs(list(set(self.remain_args_list) - set(paths)))
+		for path in paths:
+			DoCommandInProperPath(
+					lambda ra_path : DoCommand("git diff %s %s" % (ra_path, other_args)),
+					path,)
+		return 0
+
+	def do_diff_global(self):
 		DoCommand("git diff " + self.remain_args)
 		if self.options.na:
-			return
+			return 0
 		def func():
 			DoCommand("git diff " + self.remain_args)
 		ForEachExternal(func)

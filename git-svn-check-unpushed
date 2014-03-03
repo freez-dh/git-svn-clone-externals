@@ -11,6 +11,8 @@ console.setFormatter(formatter)
 logger.addHandler(console)
 logger.level = logging.INFO
 
+FOREGROUND_RED = "\033[31m" # text color contains red.
+ENDC = '\033[0m'
 
 def list_references():
     """List the references in the local repo.
@@ -75,7 +77,7 @@ def find_uncommitted(svn_branch):
                        svn_branch)
     if output:
         print 'Possible unpushed commits (against %s):' % svn_branch
-        print output
+        print FOREGROUND_RED + output + ENDC
     else:
         print 'No unpushed commits found.'
 
