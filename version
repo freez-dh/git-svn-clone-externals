@@ -1,5 +1,5 @@
-commit 45a9af7ce653b4c7cc664184c4982463d95d0221
+commit d40cfd7ba11e78f70238249fa639cb367a9df14b
 Author: freez-dh <denghui@126.com>
-Date:   Mon Mar 3 17:02:37 2014 +0800
+Date:   Tue Mar 4 10:53:19 2014 +0800
 
-    增加VERSION指令
+    修正Version指令找不到文件的问题

@@ -671,7 +671,8 @@ class Version(GitxCommand):
 		return "git version of gitx"
 
 	def run(self):
-		with open("version", "r") as f:
+		dir_path = os.path.dirname(sys.argv[0])
+		with open(os.path.join(dir_path, "version"), "r") as f:
 			ver = f.read()
 			if not ver.endswith("\n"):
 				ver += "\n"
