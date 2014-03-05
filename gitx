@@ -372,6 +372,9 @@ class PostReview(GitxCommand):
 				"run %s'git rebase git-svn -i'%s and squash all unpushed commits to single one.\n" % (FOREGROUND_RED, ENDC))
 		return 1
 
+	def get_last_log(self):
+		return DoCommandOutput('git log -1 --pretty=format:"%s"')
+
 	def do_pr(self, ver_line):
 		_tag, last_ver, ver = ver_line.split()
 		file_lists = DoCommandOutput("git diff %s %s --name-status" % (last_ver, ver))
@@ -391,10 +394,11 @@ class PostReview(GitxCommand):
 		tmp_file = tempfile.NamedTemporaryFile(delete = False)
 		tmp_file.write(file_lists + "\n")
 		tmp_file.close()
-		command = "svnx pr %s -l %s -r %s" % (
+		log = self.get_last_log()
+		command = 'svnx pr %s -l %s -r %s -m "%s"' % (
 			self.options.change_name,
 			tmp_file.name,
-			relative_path,)
+			relative_path, log)
 		command += " " + self.remain_args
 		DoCommand(command)
 		return 0
