@@ -479,7 +479,7 @@ class Checkout(GitxCommand):
 class Status(GitxCommand):
 	@classmethod
 	def get_command_name(cls):
-		return "stx"
+		return "st"
 
 	@classmethod
 	def get_description(cls):
