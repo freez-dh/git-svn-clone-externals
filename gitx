@@ -621,6 +621,11 @@ class Commit(GitxCommand):
 		return "Record changes to the repository"
 
 	def run(self):
+		return self.do_command_with_external_paths(
+				lambda ra_path, other_args: DoCommand("git commit %s %s" % (other_args, ra_path)),
+				self.do_commit_global)
+
+	def do_commit_global(self):
 		ChdirGitRoot()
 		DoCommand("git commit " + self.remain_args, 256)
 		ForEachExternal(lambda : DoCommand("git commit " + self.remain_args, 256))
