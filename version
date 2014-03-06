@@ -1,5 +1,5 @@
-commit d85a9f7be2cd118b3e931d03f2e9c2bd457f6617
+commit c8b12afeaada47162f971a5e8f0d7370c6eee006
 Author: freez-dh <denghui@126.com>
-Date:   Thu Mar 6 15:58:08 2014
+Date:   Thu Mar 6 17:49:18 2014
 
-    commit也支持路径跟参数的形式
+    updatex指令
