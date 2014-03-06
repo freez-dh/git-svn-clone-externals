@@ -73,7 +73,7 @@ def GetCurGitDir(path):
 	abspath = os.path.abspath(path)
 	cur_path = abspath
 	while True:
-		if not os.path.exists(cur_path):
+		if cur_path == "/":
 			break
 		git_dir_path = os.path.join(cur_path, git_dir)
 		if os.path.exists(git_dir_path):
@@ -126,13 +126,40 @@ def AddArgumentWithIPythonCompleter(parser, *args, **kwargs):
 		return
 	action.completer = IPython.core.completer.Completer()
 
-def DoCommandInProperPath(command, path, get_path_fail_func = None):
+def GetGitRootPathAndRaPath(path):
 	git_root_path = GetCurGitDir(path)
 	if git_root_path is None:
-		if get_path_fail_func is not None:
-			get_path_fail_func()
+		return None, None
+	ra_path = os.path.abspath(path).replace(git_root_path, "")
+	if len(ra_path) > 0 and ra_path[0] == os.path.sep:
+		ra_path = ra_path[1:]
+	return git_root_path, ra_path
+
+def GetCurBranchName(git_root_path):
+	if git_root_path is None:
+		return ""
+	name = DoCommandOutput("git symbolic-ref HEAD 2>/dev/null")
+	return name.replace("refs/heads/", "", 1)
+
+def IsPathExists(path):
+	if os.path.exists(path):
+		return True
+	git_root_path, ra_path = GetGitRootPathAndRaPath(path)
+	if git_root_path is None:
+		return False
+	cwd = os.getcwd()
+	os.chdir(git_root_path)
+	try:
+		branch_name = GetCurBranchName(git_root_path)
+		code, _ = commands.getstatusoutput("git cat-file -e %s:%s" % (branch_name, ra_path))
+		return code == 0
+	finally:
+		os.chdir(cwd)
+
+def DoCommandInProperPath(command, path, get_path_fail_func = None):
+	git_root_path, ra_path = GetGitRootPathAndRaPath(path)
+	if git_root_path is None:
 		return
-	ra_path = os.path.abspath(path).replace(git_root_path + os.path.sep, "")
 	cwd = os.getcwd()
 	os.chdir(git_root_path)
 	try:
@@ -164,6 +191,20 @@ class GitxCommand(object):
 
 	def run(self):
 		return 1
+
+	def do_command_with_external_paths(self, command, nopath_command):
+		if self.remain_args == "":
+			return nopath_command()
+		paths = [arg for arg in self.remain_args_list if IsPathExists(arg)]
+		if len(paths) == 0:
+			return nopath_command()
+		# 转换为SET会不会丢掉一些重复的函数？
+		other_args = JoinArgs(list(set(self.remain_args_list) - set(paths)))
+		for path in paths:
+			DoCommandInProperPath(
+					lambda ra_path : command(ra_path, other_args),
+					path,)
+		return 0
 
 class Clone(GitxCommand):
 	@classmethod
@@ -445,36 +486,10 @@ class Checkout(GitxCommand):
 	def get_description(cls):
 		return "git checkout with doing right with externals"
 
-	@classmethod
-	def parse_args(cls, parser):
-		AddArgumentWithIPythonCompleter(parser, "path", default = "", nargs = "*")
-
-	def _run_co_branch(self):
-		if len(self.options.path) == 0:
-			return os.system("git checkout " + self.remain_args)
-		if len(self.options.path) != 1:
-			return None
-		path = self.options.path[0]
-		if path == "":
-			return os.system("git checkout " + self.remain_args)
-		if not os.path.exists(path):
-			# may be branch
-			return os.system("git checkout " + self.remain_args)
-		return None
-
 	def run(self):
-		exit_code = self._run_co_branch()
-		if exit_code is not None:
-			return exit_code
-		for path in self.options.path:
-			self._co_file(path)
-		return 0
-
-	def _co_file(self, path):
-		DoCommandInProperPath(
-				lambda ra_path : DoCommand("git checkout %s %s" % (ra_path, self.remain_args)),
-				path,
-				lambda : DoCommand("git checkout %s %s" % (path, self.remain_args)))
+		return self.do_command_with_external_paths(
+				lambda ra_path, other_args : DoCommand("git checkout %s %s" % (other_args, ra_path)),
+				lambda : DoCommand("git checkout %s" % self.remain_args))
 
 class Status(GitxCommand):
 	@classmethod
@@ -499,9 +514,9 @@ class Stash(GitxCommand):
 
 	def run(self):
 		ChdirGitRoot()
-		DoCommand("git stash " + self.remain_args)
+		DoCommand("git stash " + self.remain_args, 256)
 		def func():
-			DoCommand("git stash " + self.remain_args)
+			DoCommand("git stash " + self.remain_args, 256)
 		ForEachExternal(func)
 		return 0
 
@@ -520,23 +535,17 @@ class Diff(GitxCommand):
 				help = "do not show git diff with externals")
 
 	def run(self):
-		if self.remain_args == "":
-			return self.do_diff_global()
-		paths = [arg for arg in self.remain_args_list if os.path.exists(arg)]
-		# 转换为SET会不会丢掉一些重复的函数？
-		other_args = JoinArgs(list(set(self.remain_args_list) - set(paths)))
-		for path in paths:
-			DoCommandInProperPath(
-					lambda ra_path : DoCommand("git diff %s %s" % (ra_path, other_args)),
-					path,)
-		return 0
+		return self.do_command_with_external_paths(
+					lambda ra_path, other_args : DoCommand("git diff %s %s" % (other_args, ra_path)),
+					lambda : self.do_diff_global())
 
 	def do_diff_global(self):
 		DoCommand("git diff " + self.remain_args)
 		if self.options.na:
 			return 0
 		def func():
-			DoCommand("git diff " + self.remain_args)
+			command = "git diff " + self.remain_args
+			DoCommand(command)
 		ForEachExternal(func)
 		return 0
 
@@ -569,18 +578,10 @@ class Add(GitxCommand):
 	def get_description(cls):
 		return "add file contents to index"
 
-	@classmethod
-	def parse_args(cls, parser):
-		AddArgumentWithIPythonCompleter(parser, "path", default = "", nargs = "*")
-
 	def run(self):
-		if len(self.options.path) == 0:
-			return DoCommand("git add")
-		for path in self.options.path:
-			DoCommandInProperPath(
-					lambda ra_path : DoCommand("git add %s %s" % (ra_path, self.remain_args)),
-					path,
-					lambda : DoCommand("git add %s %s" % (path, self.remain_args)))
+		return self.do_command_with_external_paths(
+				lambda ra_path, other_args : DoCommand("git add %s %s" % (other_args, ra_path)),
+				lambda : DoCommand("git add %s" % self.remain_args))
 
 class Reset(GitxCommand):
 	@classmethod
@@ -591,18 +592,10 @@ class Reset(GitxCommand):
 	def get_description(cls):
 		return "Reset current HEAD to the specified state"
 
-	@classmethod
-	def parse_args(cls, parser):
-		AddArgumentWithIPythonCompleter(parser, "path", default = "", nargs = "*")
-
 	def run(self):
-		if len(self.options.path) == 0:
-			return DoCommand("git reset")
-		for path in self.options.path:
-			DoCommandInProperPath(
-					lambda ra_path : DoCommand("git reset %s %s" % (ra_path, self.remain_args)),
-					path,
-					lambda : DoCommand("git reset %s %s" % (path, self.remain_args)))
+		return self.do_command_with_external_paths(
+					lambda ra_path, other_args : DoCommand("git reset %s %s" % (other_args, ra_path)),
+					lambda : DoCommand("git reset " + self.remain_args))
 
 class Rm(GitxCommand):
 	@classmethod
@@ -613,18 +606,10 @@ class Rm(GitxCommand):
 	def get_description(cls):
 		return "Remove files from the working tree and from the index"
 
-	@classmethod
-	def parse_args(cls, parser):
-		AddArgumentWithIPythonCompleter(parser, "path", default = "", nargs = "*")
-
 	def run(self):
-		if len(self.options.path) == 0:
-			return DoCommand("git rm")
-		for path in self.options.path:
-			DoCommandInProperPath(
-					lambda ra_path : DoCommand("git rm %s %s" % (ra_path, self.remain_args)),
-					path,
-					lambda : DoCommand("git rm %s %s" % (path, self.remain_args)))
+		return self.do_command_with_external_paths(
+				lambda ra_path, other_args : DoCommand("git rm %s %s" % (other_args, ra_path)),
+				lambda : DoCommand("git rm %s" % self.remain_args))
 
 class Commit(GitxCommand):
 	@classmethod
@@ -666,6 +651,20 @@ class ExternalCommit(GitxCommand):
 			DoCommandInProperPath(
 					lambda ra_path : DoCommand("git svn dcommit"),
 					path,)
+
+class Log(GitxCommand):
+	@classmethod
+	def get_command_name(cls):
+		return "log"
+
+	@classmethod
+	def get_description(cls):
+		return "show log"
+
+	def run(self):
+		return self.do_command_with_external_paths(
+				lambda ra_path, other_args : DoCommand("git log %s %s" % (other_args, ra_path), 13),
+				lambda : DoCommand("git log " + self.remain_args, 13))
 
 class Version(GitxCommand):
 	@classmethod
