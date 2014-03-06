@@ -525,9 +525,9 @@ class Status(GitxCommand):
 
 def DoStashWithName(self, stash_name):
 	ChdirGitRoot()
-	commands.getoutput("git stash save " + self.remain_args)
+	commands.getoutput("git stash save %s %s " % (stash_name, self.remain_args))
 	def func():
-		commands.getoutput("git stash save " + self.remain_args)
+		commands.getoutput("git stash save %s %s " % (stash_name, self.remain_args))
 	ForEachExternal(func)
 
 def StashPopWithName(stash_name):
@@ -535,13 +535,16 @@ def StashPopWithName(stash_name):
 	def func():
 		# do not exit when error occured
 		output = commands.getoutput("git stash list")
-		print os.getcwd(), output
-		if len(output) == 0:
+		outputs = output.split("\n")
+		if len(outputs) == 0:
 			return
-		if stash_name not in output[0]:
+		if stash_name not in outputs[0]:
 			return
-		os.system("git stash pop")
-	print 'in this wfun'
+		ret_code = os.system("git stash pop")
+		if ret_code == 0:
+			return
+		os.system("git stash drop")
+	func()
 	ForEachExternal(func)
 
 class Stash(GitxCommand):
