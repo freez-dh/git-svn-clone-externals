@@ -459,7 +459,7 @@ class PostReview(GitxCommand):
 		tmp_file.write(file_lists + "\n")
 		tmp_file.close()
 		log = self.get_last_log()
-		command = 'svnx pr %s -l %s -r %s -m "%s"' % (
+		command = "svnx pr %s -l %s -r %s -m '%s'" % (
 			self.options.change_name,
 			tmp_file.name,
 			relative_path, log)
