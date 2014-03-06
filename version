@@ -1,5 +1,5 @@
-commit d40cfd7ba11e78f70238249fa639cb367a9df14b
+commit d85a9f7be2cd118b3e931d03f2e9c2bd457f6617
 Author: freez-dh <denghui@126.com>
-Date:   Tue Mar 4 10:53:19 2014 +0800
+Date:   Thu Mar 6 15:58:08 2014
 
-    修正Version指令找不到文件的问题
+    commit也支持路径跟参数的形式

@@ -18,10 +18,12 @@
 
 import os
 import sys
+import time
 import argparse
 import inspect
 import commands
 import tempfile
+import random
 
 try:
 	import argcomplete
@@ -42,6 +44,10 @@ def exit(code):
 	if _before_exit is not None:
 		_before_exit()
 	sys.exit(code)
+
+def SetBeforeExitFunc(func):
+	global _before_exit
+	_before_exit = func
 
 def DoCommandStatusOutput(command, *except_codes):
 	exit_code, output = commands.getstatusoutput(command)
@@ -361,7 +367,22 @@ class Update(GitxCommand):
 		return "update to svn HEAD"
 
 	def run(self):
-		return os.system("git-svn-update-all")
+		return DoCommand("git-svn-update-all")
+
+class UpdateX(Update):
+	@classmethod
+	def get_command_name(cls):
+		return "ux"
+
+	def run(self):
+		cur_time = str(int(time.time()))
+		ran = str(random.randint(0, 10000000))
+		name = "_".join(("updatex", cur_time, ran))
+		DoStashWithName(self, name)
+		def func():
+			StashPopWithName(name)
+		SetBeforeExitFunc(func)
+		return super(UpdateX, self).run()
 
 class ShowBranch(GitxCommand):
 	@classmethod
@@ -450,8 +471,7 @@ class PostReview(GitxCommand):
 		def func():
 			# 潜规则用VIM
 			DoCommand("git config --global core.editor vim")
-		global _before_exit
-		_before_exit = func
+		SetBeforeExitFunc(func)
 		DoCommand("git config --global core.editor git-svn-squash-editor")
 		DoCommand("git rebase git-svn -i")
 
@@ -502,6 +522,27 @@ class Status(GitxCommand):
 
 	def run(self):
 		return DoCommands("git status", "git-svn-check-unpushed", "git-svn-externals-check")
+
+def DoStashWithName(self, stash_name):
+	ChdirGitRoot()
+	commands.getoutput("git stash save " + self.remain_args)
+	def func():
+		commands.getoutput("git stash save " + self.remain_args)
+	ForEachExternal(func)
+
+def StashPopWithName(stash_name):
+	ChdirGitRoot()
+	def func():
+		# do not exit when error occured
+		output = commands.getoutput("git stash list")
+		print os.getcwd(), output
+		if len(output) == 0:
+			return
+		if stash_name not in output[0]:
+			return
+		os.system("git stash pop")
+	print 'in this wfun'
+	ForEachExternal(func)
 
 class Stash(GitxCommand):
 	@classmethod
