@@ -425,11 +425,18 @@ class PostReview(GitxCommand):
 		return self.do_pr(vers[0])
 
 	def try_auto_squash(self):
-		ans = raw_input("There are more than one commits unpushed to svn, auto squash them together?[Y/N]")
+		ans = raw_input("There are more than one commits unpushed to svn, auto squash them together?[Y/N/I]")
 		ans = ans.lower()
 		if ans == "y":
 			self.auto_squash()
 			self.first_try = False
+			self.do()
+			return 0
+		elif ans == "i":
+			log = raw_input("Please input log:")
+			self.auto_squash()
+			self.first_try = False
+			DoCommand("git commit --amend -m '%s'" % log)
 			self.do()
 			return 0
 		sys.stderr.write("if you want to solve this manually,"
