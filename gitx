@@ -414,9 +414,13 @@ class PostReview(GitxCommand):
 		ChdirGitRoot()
 		self.do()
 
-	def do(self):
+	def get_versions(self):
 		lines = DoCommandOutput("git svn dcommit --dry-run").split("\n")
 		vers = [line for line in lines if line.startswith("diff-tree")]
+		return vers
+
+	def do(self):
+		vers = self.get_versions()
 		if len(vers) == 0:
 			sys.stdout.write("No commit need push to svn\n")
 			return 0
@@ -425,23 +429,32 @@ class PostReview(GitxCommand):
 		return self.do_pr(vers[0])
 
 	def try_auto_squash(self):
-		ans = raw_input("There are more than one commits unpushed to svn, auto squash them together?[Y/N/I]")
+		ans = raw_input("There are more than one commits unpushed to svn, auto squash them together?[(Y)es/(N)o/(I)nputLog/(L)astLog]")
 		ans = ans.lower()
 		if ans == "y":
 			self.auto_squash()
-			self.first_try = False
 			self.do()
 			return 0
 		elif ans == "i":
 			log = raw_input("Please input log:")
-			self.auto_squash()
-			self.first_try = False
-			DoCommand("git commit --amend -m '%s'" % log)
-			self.do()
+			self._squash_with_log(log)
+			return 0
+		elif ans == "l":
+			vers = self.get_versions()
+			if len(vers) == 0:
+				return 1
+			last_version_after_commit = vers[0].replace("diff-tree", "")
+			log = DoCommandOutput("git log -1 --pretty=format:'%s' " + last_version_after_commit)
+			self._squash_with_log(log)
 			return 0
 		sys.stderr.write("if you want to solve this manually,"
 				"run %s'git rebase git-svn -i'%s and squash all unpushed commits to single one.\n" % (FOREGROUND_RED, ENDC))
 		return 1
+
+	def _squash_with_log(self, log):
+		self.auto_squash()
+		DoCommand("git commit --amend -m '%s'" % log)
+		self.do()
 
 	def get_last_log(self):
 		return DoCommandOutput('git log -1 --pretty=format:"%s"')
@@ -481,6 +494,7 @@ class PostReview(GitxCommand):
 		SetBeforeExitFunc(func)
 		DoCommand("git config --global core.editor git-svn-squash-editor")
 		DoCommand("git rebase git-svn -i")
+		self.first_try = False
 
 class Ci(GitxCommand):
 	@classmethod
