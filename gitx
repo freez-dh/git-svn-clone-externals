@@ -520,6 +520,9 @@ class Ci(GitxCommand):
 		version = "HEAD"
 		if len(self.remain_args) != 0:
 			version = self.remain_args
+		stash_name = "commit_" + str(time.time())
+		SetBeforeExitFunc(lambda : StashPopWithName(stash_name, True))
+		DoStashWithName(self, stash_name)
 		return DoCommands(
 				"svnx ci -f " + self.options.change_name,
 				"git svn dcommit %s %s" % (version, self.options.change_name),
