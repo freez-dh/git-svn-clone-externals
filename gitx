@@ -24,6 +24,7 @@ import inspect
 import commands
 import tempfile
 import random
+import atexit
 
 try:
 	import argcomplete
@@ -40,9 +41,10 @@ ENDC = '\033[0m'
 
 _before_exit = None
 
-def exit(code):
+def CallBeforeExit():
 	if _before_exit is not None:
 		_before_exit()
+def exit(code):
 	sys.exit(code)
 
 def SetBeforeExitFunc(func):
@@ -420,6 +422,9 @@ class PostReview(GitxCommand):
 		return vers
 
 	def do(self):
+		stash_name = "postreview_" + str(time.time())
+		DoStashWithName(self, stash_name)
+		SetBeforeExitFunc(lambda : StashPopWithName(stash_name, True))
 		vers = self.get_versions()
 		if len(vers) == 0:
 			sys.stdout.write("No commit need push to svn\n")
@@ -551,7 +556,7 @@ def DoStashWithName(self, stash_name):
 		commands.getoutput("git stash save %s %s " % (stash_name, self.remain_args))
 	ForEachExternal(func)
 
-def StashPopWithName(stash_name):
+def StashPopWithName(stash_name, is_silent = False):
 	ChdirGitRoot()
 	def func():
 		# do not exit when error occured
@@ -561,10 +566,14 @@ def StashPopWithName(stash_name):
 			return
 		if stash_name not in outputs[0]:
 			return
-		ret_code = os.system("git stash pop")
+		command = "git stash pop"
+		if is_silent:
+			command += " >/dev/null"
+		ret_code = os.system(command)
 		if ret_code == 0:
 			return
 		os.system("git stash drop")
+
 	func()
 	ForEachExternal(func)
 
@@ -772,6 +781,7 @@ def register_all_command(parser):
 		add_command(subparsers, obj)
 
 def main():
+	atexit.register(CallBeforeExit)
 	parser = argparse.ArgumentParser()
 	register_all_command(parser)
 	argcomplete.autocomplete(parser)
