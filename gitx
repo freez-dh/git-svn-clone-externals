@@ -44,6 +44,7 @@ _before_exit = None
 def CallBeforeExit():
 	if _before_exit is not None:
 		_before_exit()
+
 def exit(code):
 	sys.exit(code)
 
@@ -422,9 +423,10 @@ class PostReview(GitxCommand):
 		return vers
 
 	def do(self):
+		DoCommand("git st -s")
 		stash_name = "postreview_" + str(time.time())
-		DoStashWithName(self, stash_name)
 		SetBeforeExitFunc(lambda : StashPopWithName(stash_name, True))
+		DoStashWithName(self, stash_name)
 		vers = self.get_versions()
 		if len(vers) == 0:
 			sys.stdout.write("No commit need push to svn\n")
