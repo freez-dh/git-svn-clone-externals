@@ -429,7 +429,7 @@ class PostReview(GitxCommand):
 		return vers
 
 	def do(self):
-		DoCommand("git st -s")
+		DoCommand("git status -s")
 		stash_name = "postreview_" + str(time.time())
 		SetBeforeExitFunc(lambda : StashPopWithName(stash_name, True))
 		DoStashWithName(self, stash_name)
