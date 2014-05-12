@@ -39,11 +39,17 @@ EXTERNALS_DIR_NAME = ".git_externals"
 FOREGROUND_RED = "\033[31m" # text color contains red.
 ENDC = '\033[0m'
 
+_called_before_exit = False
 _before_exit = None
 
 def CallBeforeExit():
-	if _before_exit is not None:
-		_before_exit()
+	global _called_before_exit
+	if _before_exit is None:
+		return
+	if _called_before_exit:
+		return
+	_before_exit()
+	_called_before_exit = True
 
 def exit(code):
 	sys.exit(code)
