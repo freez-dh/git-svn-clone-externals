@@ -52,6 +52,7 @@ def CallBeforeExit():
 	_called_before_exit = True
 
 def exit(code):
+	CallBeforeExit()
 	sys.exit(code)
 
 def SetBeforeExitFunc(func):
