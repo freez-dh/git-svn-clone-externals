@@ -422,6 +422,10 @@ class PostReview(GitxCommand):
 	def run(self):
 		self.first_try = True
 		ChdirGitRoot()
+		DoCommand("git status -s")
+		stash_name = "postreview_" + str(time.time())
+		SetBeforeExitFunc(lambda : StashPopWithName(stash_name, True))
+		DoStashWithName(self, stash_name)
 		self.do()
 
 	def get_versions(self):
@@ -430,10 +434,6 @@ class PostReview(GitxCommand):
 		return vers
 
 	def do(self):
-		DoCommand("git status -s")
-		stash_name = "postreview_" + str(time.time())
-		SetBeforeExitFunc(lambda : StashPopWithName(stash_name, True))
-		DoStashWithName(self, stash_name)
 		vers = self.get_versions()
 		if len(vers) == 0:
 			sys.stdout.write("No commit need push to svn\n")
@@ -502,12 +502,9 @@ class PostReview(GitxCommand):
 		return 0
 
 	def auto_squash(self):
-		def func():
-			# 潜规则用VIM
-			DoCommand("git config --global core.editor vim")
-		SetBeforeExitFunc(func)
 		DoCommand("git config --global core.editor git-svn-squash-editor")
 		DoCommand("git rebase git-svn -i")
+		DoCommand("git config --global core.editor vim")
 		self.first_try = False
 
 class Ci(GitxCommand):
