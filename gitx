@@ -525,12 +525,14 @@ class Ci(GitxCommand):
 		if len(self.remain_args) != 0:
 			version = self.remain_args
 		stash_name = "commit_" + str(time.time())
-		SetBeforeExitFunc(lambda : StashPopWithName(stash_name, True))
+		def BeforeExitFunc():
+			StashPopWithName(stash_name, True)
+			DoCommand("git-svn-externals-check")
+		SetBeforeExitFunc(BeforeExitFunc)
 		DoStashWithName(self, stash_name)
 		return DoCommands(
 				"svnx ci -f " + self.options.change_name,
-				"git svn dcommit %s %s" % (version, self.options.change_name),
-				"git-svn-externals-check")
+				"git svn dcommit %s %s" % (version, self.options.change_name),)
 
 class Checkout(GitxCommand):
 	@classmethod
@@ -804,6 +806,5 @@ if __name__ == "__main__":
 	except:
 		raise
 	finally:
-		if _before_exit is not None:
-			_before_exit()
+		CallBeforeExit()
 
