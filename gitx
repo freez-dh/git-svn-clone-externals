@@ -25,6 +25,7 @@ import commands
 import tempfile
 import random
 import atexit
+import datetime
 
 try:
 	import argcomplete
@@ -76,6 +77,9 @@ def DoCommand(command, *except_codes):
 		sys.stderr.write((FOREGROUND_RED + "Exit because '%s' failed,code:%s\n" + ENDC) % (command, exit_code))
 		exit(exit_code)
 	return exit_code
+
+def PrintError(content):
+	sys.stderr.write((FOREGROUND_RED + content + "\n" + ENDC))
 
 def DoCommands(*args):
 	exit_code = 0
@@ -186,6 +190,10 @@ def DoCommandInProperPath(command, path, get_path_fail_func = None):
 def JoinArgs(args):
 	args = map(lambda arg : arg if " " not in arg else '"%s"' % arg, args)
 	return " ".join(args)
+
+def GetPrNamePath():
+	pr_path = os.path.join(GetGitRootDir(), ".git", "pr_name")
+	return pr_path
 
 class GitxCommand(object):
 	@classmethod
@@ -417,7 +425,7 @@ class PostReview(GitxCommand):
 
 	@classmethod
 	def parse_args(cls, parser):
-		parser.add_argument("change_name")
+		parser.add_argument("change_name", nargs="?", default="")
 
 	def run(self):
 		self.first_try = True
@@ -473,6 +481,23 @@ class PostReview(GitxCommand):
 	def get_last_log(self):
 		return DoCommandOutput('git log -1 --pretty=format:"%s"')
 
+	def resolve_change_name(self):
+		if self.options.change_name != "":
+			return
+		pr_path = GetPrNamePath()
+		if not os.path.exists(pr_path):
+			self.options.change_name = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+			f = open(pr_path, "w")
+			f.write(self.options.change_name)
+			return
+		try:
+			f = open(pr_path, "r")
+		except IOError:
+			return
+		d = f.read().strip()
+		print 'file change name', d
+		self.options.change_name = d
+
 	def do_pr(self, ver_line):
 		_tag, last_ver, ver = ver_line.split()
 		file_lists = DoCommandOutput("git diff %s %s --name-status" % (last_ver, ver))
@@ -492,6 +517,7 @@ class PostReview(GitxCommand):
 		tmp_file = tempfile.NamedTemporaryFile(delete = False)
 		tmp_file.write(file_lists + "\n")
 		tmp_file.close()
+		self.resolve_change_name()
 		log = self.get_last_log()
 		command = "svnx pr %s -l %s -r %s -m '%s'" % (
 			self.options.change_name,
@@ -518,9 +544,21 @@ class Ci(GitxCommand):
 
 	@classmethod
 	def parse_args(cls, parser):
-		parser.add_argument("change_name")
+		parser.add_argument("change_name", nargs="?", default="")
+
+	def resolve_change_name(self):
+		if self.options.change_name != "":
+			return
+		pr_path = GetPrNamePath()
+		if not os.path.exists(pr_path):
+			PrintError("change name missing")
+			exit(1)
+			return
+		f = open(pr_path, "r")
+		self.options.change_name = f.read().strip()
 
 	def run(self):
+		self.resolve_change_name()
 		version = "HEAD"
 		if len(self.remain_args) != 0:
 			version = self.remain_args
@@ -530,9 +568,11 @@ class Ci(GitxCommand):
 			DoCommand("git-svn-externals-check")
 		SetBeforeExitFunc(BeforeExitFunc)
 		DoStashWithName(self, stash_name)
+		pr_name = GetPrNamePath()
 		return DoCommands(
 				"svnx ci -f " + self.options.change_name,
-				"git svn dcommit %s %s" % (version, self.options.change_name),)
+				"git svn dcommit %s %s" % (version, self.options.change_name),
+				"rm %s" % pr_name)
 
 class Checkout(GitxCommand):
 	@classmethod
