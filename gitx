@@ -82,10 +82,11 @@ def PrintError(content):
 	sys.stderr.write((FOREGROUND_RED + content + "\n" + ENDC))
 
 def DoCommands(*args):
-	exit_code = 0
+	codes = []
 	for command in args:
 		exit_code = DoCommand(command)
-	return exit_code
+		codes.append(exit_code)
+	return codes
 
 # 得到路径对应的git根目录
 def GetCurGitDir(path):
@@ -260,6 +261,8 @@ class Clone(GitxCommand):
 			name = splits[-1]
 		if "-r" not in self.remain_args:
 			version = "-r %s:HEAD" % self.get_last_version(url)
+		else:
+			version = ""
 		command = "git svn clone %s %s %s %s" % (url, name, self.remain_args, version)
 		return DoCommands(command, "cd %s;git-svn-clone-externals" % name)
 
@@ -563,16 +566,23 @@ class Ci(GitxCommand):
 		if len(self.remain_args) != 0:
 			version = self.remain_args
 		stash_name = "commit_" + str(time.time())
+		exit_codes = None
 		def BeforeExitFunc():
 			StashPopWithName(stash_name, True)
-			DoCommand("git-svn-externals-check")
+			if exit_codes is not None and exit_codes[1] == 0:
+				DoCommand("git-svn-externals-check")
 		SetBeforeExitFunc(BeforeExitFunc)
 		DoStashWithName(self, stash_name)
 		pr_name = GetPrNamePath()
-		return DoCommands(
+		commands = [
 				"svnx ci -f " + self.options.change_name,
 				"git svn dcommit %s %s" % (version, self.options.change_name),
-				"rm %s" % pr_name)
+		]
+		if os.path.exists(pr_name):
+			commands.append("rm %s" % pr_name)
+		print commands
+		exit_codes = DoCommands(*commands)
+		return exit_codes
 
 class Checkout(GitxCommand):
 	@classmethod
